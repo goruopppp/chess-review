@@ -1363,6 +1363,7 @@
     } else {
       saveSession(res);
       syncTrainerFromReview(res);   // fresh review → new trainer exercises (deduped)
+      perfSyncReviewed(res);        // current game → Performance Lab (best effort)
       toast(`Review complete � White ${res.players.white.accuracy}% vs Black ${res.players.black.accuracy}%`, 4000);
     }
   }
@@ -1483,6 +1484,7 @@
     if (name === "explorer") renderExplorer();
     if (name === "puzzle" && !state.puzzle) pzNew();
     if (name === "trainer") refreshTrainer();
+    if (name === "lab") refreshLab();
   }
 
   /* ---------------- opening explorer ---------------- */
@@ -2309,6 +2311,161 @@
     });
     toast("Solution: " + ex.bestSan, 3500);
   }
+
+  /* ---------------- Performance Lab (v64) ---------------- */
+  const labEscape = typeof trainerEsc === "function" ? trainerEsc : ((s) =>
+    String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"));
+
+  function paintLabHero(d) {
+    const cell = (v, label, cls) =>
+      `<div class="lab-stat ${cls || ""}"><b>${v}</b><span>${label}</span></div>`;
+    const avgAcc = (d.avgAccuracy && d.avgAccuracy.white != null && d.avgAccuracy.black != null)
+      ? Math.round((d.avgAccuracy.white + d.avgAccuracy.black) / 2) : null;
+    $("labHero").innerHTML =
+      cell(d.total, "imported", "accent") +
+      cell(d.decidedGames ? `${d.winRate}%` : "—", "win rate",
+           d.winRate == null ? "" : (d.winRate >= 55 ? "ok" : d.winRate < 40 ? "hot" : "")) +
+      cell(d.reviewedGames ?? "—", "reviewed", "ok") +
+      cell(avgAcc != null ? avgAcc + "%" : "—", "avg accuracy", "ok") +
+      cell(d.errorTotals.blunders || 0, "blunders", (d.errorTotals.blunders || 0) > 0 ? "hot" : "") +
+      cell(d.errorTotals.misses || 0, "missed wins", (d.errorTotals.misses || 0) > 0 ? "hot" : "");
+  }
+  function paintLabWeaknesses(w) {
+    const el = $("labWeaknessCards");
+    const meta = $("labWeaknessMeta");
+    meta.textContent = `${w.reviewedGames || 0} reviewed game(s)`;
+    if (!w.weaknesses.length) {
+      el.innerHTML = `<div class="lab-empty">${labEscape(w.note || "Nothing to see yet — review more games or import them to surface patterns here.")}</div>`;
+      return;
+    }
+    el.innerHTML = w.weaknesses.slice(0, 4).map((f) => `
+      <div class="lab-weak">
+        <div>
+          <div class="lab-weak-title">${labEscape(f.label)}</div>
+          <div class="lab-weak-desc">${labEscape(f.description)}</div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-end; text-align:right">
+          <span class="lab-weak-chip ${f.severity === 'high' ? 'high' : f.severity === 'medium' ? 'medium' : 'low'}">${f.severity}</span>
+          <span class="lab-weak-count">${f.count}</span>
+          <span class="text-small text-muted">${f.confidence} confidence</span>
+        </div>
+      </div>`).join("");
+  }
+  function paintLabOpenings(o) {
+    const el = $("labOpeningRows");
+    const fams = o.families || [];
+    if (!fams.length) { el.innerHTML = `<div class="lab-empty">No games classified yet.</div>`; return; }
+    el.innerHTML = fams.slice(0, 10).map((f) => {
+      const decided = f.wins + f.losses + f.draws;
+      const bar = decided ? Math.round(100 * f.wins / decided) : 0;
+      const wr = decided ? Math.round(100 * f.wins / decided) : null;
+      const cls = wr == null ? "mid" : wr >= 60 ? "" : wr >= 40 ? "mid" : "bad";
+      const confNote = f.confidence === "high" ? "" : ` · N=${f.games} (${f.confidence})`;
+      return `<div class="lab-op">
+        <span class="lab-op-eco">${labEscape(f.eco || "?")}</span>
+        <span>
+          <div class="lab-op-name">${labEscape(f.opening)}</div>
+          <div class="lab-op-meta"><span>${f.games} games · ${f.wins}W ${f.losses}L ${f.draws}D${confNote}</span></div>
+          <div class="lab-op-bar"><div class="lab-op-bar-fill ${cls}" style="width:${bar}%"></div></div>
+        </span>
+        <span class="lab-op-wr">${wr == null ? "—" : wr + "%"}</span>
+      </div>`;
+    }).join("");
+  }
+  function paintLabRecommendations(r) {
+    const el = $("labRecList");
+    const recs = r.recommendations || [];
+    if (!recs.length) { el.innerHTML = `<div class="lab-empty">Not enough data yet — review more games.</div>`; return; }
+    el.innerHTML = recs.map((rec, i) => `
+      <div class="lab-rec prio-${rec.priority}">
+        <span class="lab-rec-num">${i + 1}</span>
+        <span>
+          <div class="lab-rec-title">${labEscape(rec.title)}<span class="lab-rec-tag">${rec.category}</span></div>
+          <div class="lab-rec-body">${labEscape(rec.exerciseFocus)}</div>
+          <div class="lab-rec-why">${labEscape(rec.why)}</div>
+        </span>
+      </div>`).join("");
+  }
+  function paintLabGames(list) {
+    const el = $("labGameList");
+    $("labGameMeta").textContent = `${list.length} games`;
+    if (!list.length) {
+      el.innerHTML = `<div class="lab-empty">No games imported yet. Use "Import PGN file" or "Paste PGN" above — games are deduplicated automatically.</div>`;
+      return;
+    }
+    el.innerHTML = list.slice(0, 20).map((g) => {
+      const cls = g.result === "1-0" ? "win" : g.result === "0-1" ? "loss" : "draw";
+      const label = g.result === "1-0" ? "1-0" : g.result === "0-1" ? "0-1" : "½-½";
+      return `<div class="lab-game">
+        <span><div class="lab-game-name">${labEscape(g.white)} vs ${labEscape(g.black)}</div>
+          <div class="lab-game-meta">${labEscape(g.opening)} · ${labEscape(g.date || "?")} · ${labEscape(g.tcBucket)}</div></span>
+        <span class="lab-game-result ${cls}">${label}</span>
+        <button class="btn btn-xs lab-game-del" data-id="${g.id}" type="button" aria-label="Delete">✕</button>
+      </div>`;
+    }).join("");
+    el.querySelectorAll(".lab-game-del").forEach((b) => {
+      b.onclick = async () => {
+        await post("/api/perf/games/delete", { id: b.dataset.id });
+        refreshLab();
+      };
+    });
+  }
+  async function refreshLab() {
+    try {
+      const [d, w, o, r, g] = await Promise.all([
+        api("/api/perf/overall"), api("/api/perf/weaknesses"),
+        api("/api/perf/openings"), api("/api/perf/recommendations"),
+        api("/api/perf/games?limit=30"),
+      ]);
+      paintLabHero(d); paintLabWeaknesses(w); paintLabOpenings(o);
+      paintLabRecommendations(r); paintLabGames(g.games || []);
+    } catch (e) {
+      $("labHero").innerHTML = `<div class="lab-stat" style="grid-column:1/-1"><span>Lab unavailable — is the server awake?</span></div>`;
+      $("labWeaknessCards").innerHTML = ""; $("labOpeningRows").innerHTML = "";
+      $("labRecList").innerHTML = ""; $("labGameList").innerHTML = "";
+    }
+  }
+  async function perfSyncReviewed(res) {
+    try { await post("/api/perf/import_review", { review: res }); } catch (e) { /* best effort */ }
+  }
+  async function perfImportBulk(text) {
+    try {
+      const r = await post("/api/perf/import_pgn", { pgn: text });
+      if (r && r.ok) {
+        toast(`Imported ${r.inserted} new game(s) · ${r.duplicates} duplicate(s) skipped`, 4500);
+        refreshLab();
+      } else if (r && r.error) {
+        showLabImportError(r.error);
+      }
+    } catch (e) {
+      showLabImportError("Import failed — check the PGN and try again.");
+    }
+  }
+  function showLabImportError(msg) {
+    const el = $("labImportError");
+    el.textContent = msg;
+    el.hidden = false;
+  }
+  $("labImportPgnBtn").onclick = () => { $("labImportModal").hidden = false; $("labImportText").focus(); };
+  $("labImportClose").onclick = () => { $("labImportModal").hidden = true; $("labImportError").hidden = true; };
+  $("labImportCancel").onclick = $("labImportClose").onclick;
+  $("labImportGo").onclick = () => {
+    const text = $("labImportText").value.trim();
+    if (!text) { showLabImportError("Paste a PGN first."); return; }
+    $("labImportModal").hidden = true;
+    $("labImportError").hidden = true;
+    perfImportBulk(text);
+    $("labImportText").value = "";
+  };
+  $("labImportBtn").onclick = () => $("labImportFile").click();
+  $("labImportFile").onchange = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    await perfImportBulk(text);
+    e.target.value = "";
+  };
+  $("labRefreshBtn").onclick = refreshLab;
 
   /* ---------------- Lichess puzzles (v60) ---------------- */
   let pzStats = { solved: 0, streak: 0, best: 0, rating: 1200 };
@@ -3760,6 +3917,13 @@
         renderBoard();
       }
       repRestoreLast(); // reopen the last built/opened repertoire (tab + preview)
+      // one-shot: every locally-saved review is imported into the Lab at boot
+      try {
+        if (!localStorage.getItem("crs_perf_synced_v64")) {
+          localStorage.setItem("crs_perf_synced_v64", "1");
+          Promise.all(libLoad().map((g) => perfSyncReviewed(g.review))).catch(() => {});
+        }
+      } catch (e) { /* private mode */ }
       loadSamples();
       maybeReattachJob(); // a review that was running at refresh keeps going
     });
