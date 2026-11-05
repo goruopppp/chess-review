@@ -434,6 +434,112 @@ def api_trainer_detach():
         return jsonify({"error": str(e)}), 500
 
 
+# ---------------- performance lab ----------------
+@app.post("/api/perf/import_pgn")
+def api_perf_import_pgn():
+    """Bulk import a PGN blob (single or multi-game). Dedups content-hashed games."""
+    from server import perfdb
+    data = request.get_json(force=True, silent=True) or {}
+    text = (data.get("pgn") or "").strip()
+    if not text:
+        return jsonify({"error": "missing pgn"}), 400
+    if len(text) > 20_000_000:
+        return jsonify({"error": "file too large (20 MB limit)"}), 400
+    try:
+        parsed = perfdb.parse_pgn_text(text)
+        counts = perfdb.import_games(parsed, source="import")
+        return jsonify({"ok": True, "parsed": len(parsed), **counts})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"import failed: {e}"}), 500
+
+
+@app.post("/api/perf/import_review")
+def api_perf_import_review():
+    """Attach (or overwrite) a review for a game."""
+    from server import perfdb
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        res = perfdb.attach_review(data.get("review"))
+        return jsonify(res)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"review import failed: {e}"}), 500
+
+
+@app.get("/api/perf/overall")
+def api_perf_overall():
+    from server import perfdb
+    return jsonify(perfdb.overall())
+
+
+@app.get("/api/perf/openings")
+def api_perf_openings():
+    from server import perfdb
+    return jsonify(perfdb.openings_report())
+
+
+@app.get("/api/perf/weaknesses")
+def api_perf_weaknesses():
+    from server import perfdb
+    try:
+        return jsonify(perfdb.weaknesses())
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/perf/recommendations")
+def api_perf_recommendations():
+    from server import perfdb
+    try:
+        return jsonify(perfdb.recommendations())
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/perf/timeline")
+def api_perf_timeline():
+    from server import perfdb
+    return jsonify(perfdb.timeline())
+
+
+@app.get("/api/perf/games")
+def api_perf_games():
+    from server import perfdb
+    limit = max(1, min(500, int(request.args.get("limit") or 100)))
+    return jsonify({"games": perfdb.list_games(limit)})
+
+
+@app.post("/api/perf/games/delete")
+def api_perf_games_delete():
+    from server import perfdb
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        return jsonify({"ok": perfdb.delete_game((data.get("id") or "").strip())})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/perf/aliases")
+def api_perf_aliases():
+    from server import perfdb
+    data = request.get_json(force=True, silent=True) or {}
+    a, c = (data.get("alias") or "").strip(), (data.get("canonical") or "").strip()
+    if not a or not c:
+        return jsonify({"error": "alias and canonical required"}), 400
+    perfdb.add_alias(a, c)
+    perfdb.normalize_aliases()
+    return jsonify({"ok": True})
+
+
+@app.get("/api/perf/aliases")
+def api_perf_aliases_get():
+    from server import perfdb
+    return jsonify({"aliases": perfdb.list_aliases()})
+
+
 _rjobs = {}
 _rjobs_lock = threading.Lock()
 
