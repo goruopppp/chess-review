@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=59">
+<link rel="stylesheet" href="css/style.css?v=60">
 </head>
 <body>
 <div class="app-shell">
@@ -187,6 +187,7 @@
       <button class="tab" data-tab="engine" role="tab" aria-selected="false" type="button">Engine</button>
       <button class="tab" data-tab="explorer" role="tab" aria-selected="false" type="button">Explorer</button>
       <button class="tab" data-tab="repertoire" role="tab" aria-selected="false" type="button">Repertoire</button>
+      <button class="tab" data-tab="puzzle" role="tab" aria-selected="false" type="button">Puzzle</button>
     </div>
 
     <div class="tab-body" id="tab-report" role="tabpanel">
@@ -273,6 +274,63 @@
         <div id="repLines" class="rep-lines"></div>
         <p class="text-small text-muted">Click a line to copy it. PGN contains the full tree with variations and win-rate comments.</p>
       </div>
+    </div>
+
+    <div class="tab-body" id="tab-puzzle" role="tabpanel" hidden>
+      <div class="pz-controls">
+        <select id="pzTheme" class="select" title="Puzzle theme">
+          <option value="">Mixed / any theme</option>
+          <optgroup label="Mates">
+            <option value="mateIn1">Mate in 1</option>
+            <option value="mateIn2">Mate in 2</option>
+            <option value="mateIn3">Mate in 3</option>
+            <option value="mateIn4">Mate in 4</option>
+            <option value="mateIn5">Mate in 5+</option>
+          </optgroup>
+          <optgroup label="Tactics">
+            <option value="fork">Fork</option>
+            <option value="pin">Pin</option>
+            <option value="skewer">Skewer</option>
+            <option value="discoveredAttack">Discovered attack</option>
+            <option value="discoveredCheck">Discovered check</option>
+            <option value="doubleCheck">Double check</option>
+            <option value="hangingPiece">Hanging piece</option>
+            <option value="intermezzo">Intermezzo / Zwischenzug</option>
+            <option value="sacrifice">Sacrifice</option>
+            <option value="quietMove">Quiet move</option>
+          </optgroup>
+          <optgroup label="Positions">
+            <option value="oneMove">One-move tactics</option>
+            <option value="endgame">Endgame</option>
+            <option value="opening">Opening</option>
+            <option value="crushing">Crushing advantage</option>
+            <option value="decisive">Decisive</option>
+            <option value="advance">Pawn advance</option>
+            <option value="long">Long puzzles (3+ moves)</option>
+            <option value="short">Short puzzles</option>
+          </optgroup>
+        </select>
+        <button id="pzNew" class="btn btn-primary btn-sm" type="button">New puzzle</button>
+      </div>
+      <div id="pzSolved" class="pz-solvedbar" hidden>
+        <b id="pzSolvedText">Solved!</b>
+        <button id="pzNextBtn" class="btn btn-sm pz-nextbtn" type="button">Next puzzle</button>
+      </div>
+      <div id="pzCard" class="pz-card">
+        <div class="pz-topline">
+          <span class="pz-rating" id="pzRating">&#8212;</span>
+          <span class="pz-themes" id="pzThemes">&#8212;</span>
+        </div>
+        <div class="pz-turn" id="pzTurn">Pick a theme and press <b>New puzzle</b>.</div>
+        <div class="pz-actions">
+          <button id="pzHintBtn" class="btn btn-sm" type="button">Hint</button>
+          <button id="pzRetryBtn" class="btn btn-sm" type="button">Retry</button>
+          <button id="pzSkipBtn" class="btn btn-sm" type="button">Skip</button>
+          <a id="pzLink" class="btn btn-sm" target="_blank" rel="noopener" href="#" hidden>Open on lichess.org</a>
+        </div>
+        <div class="pz-stats" id="pzStats"></div>
+      </div>
+      <p class="text-small text-muted">Puzzles supplied by lichess.org. Your streak and local puzzle rating live in this browser. If lichess is slow or offline, the last fresh puzzle for the selected theme is served from cache.</p>
     </div>
 
     <div class="panel-foot">
@@ -512,6 +570,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=59"></script>
+<script src="js/app.js?v=60"></script>
 </body>
 </html>
