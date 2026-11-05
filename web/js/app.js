@@ -484,6 +484,29 @@
     updateExploreInfo();
     switchTab("engine");
   }
+  /* ---------------- "home": plain start-position analysis ---------------- */
+  function goHome() {
+    // leave anything that owns the board, using each mode's own exit routine
+    if (state.quiz) quizQuit();
+    if (state.repTrain) repTrainQuit();
+    if (state.linePlay) stopLinePlay();
+    stopAutoplay();
+    if (editor.active) toggleEditor(false);
+    repStopPreview();
+    exitExplore(false);
+    state.review = null;      // home = the bare analysis workbench
+    state.customFen = null;
+    try {                     // don't auto-restore a game we walked away from
+      localStorage.removeItem("crs_last_review");
+      localStorage.removeItem("crs_last_pos");
+      localStorage.removeItem("crs_last_custom");
+    } catch (e) { /* private mode */ }
+    state.live = { fen: null, lines: null, engine: null, depth: null, cycle: 0 };
+    board.setPosition(START_FEN);
+    enterExplore(); // analysis-ready, Engine tab active -> top moves stream in
+    renderBoard();
+  }
+
   function exitExplore(rerender) {
     if (!state.explore) return;
     state.explore = null;
@@ -2873,6 +2896,7 @@
   window.addEventListener("error", (e) => toast("Error: " + e.message, 5000));
   window.addEventListener("unhandledrejection", (e) => toast("Error: " + (e.reason && e.reason.message || e.reason), 5000));
   $("btnPlay").innerHTML = ICON_PLAY;
+  $("brandHome").onclick = goHome;
   applyUiTheme();
   repRefreshSaved();
   applyBoardSize();
