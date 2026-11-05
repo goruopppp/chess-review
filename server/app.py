@@ -334,6 +334,106 @@ def api_puzzle():
         return jsonify({"error": f"puzzle fetch failed: {e}"}), 502
 
 
+# ---------------- trainer (spaced repetition) ----------------
+@app.post("/api/trainer/extract")
+def api_trainer_extract():
+    """Import exercises from a finished review payload; idempotent dedupe."""
+    from server import trainer
+    data = request.get_json(force=True, silent=True) or {}
+    res = data.get("review")
+    if not isinstance(res, dict):
+        return jsonify({"error": "missing review payload"}), 400
+    if not isinstance(res.get("moves"), list) or not isinstance(res.get("positions"), list):
+        return jsonify({"error": "review payload missing moves/positions"}), 400
+    try:
+        exercises = trainer.extract_from_review(res)
+        counts = trainer.sync_exercises(exercises)
+        return jsonify({"ok": True, "candidates": len(exercises), **counts})
+    except Exception as e:
+        return jsonify({"error": f"trainer extract failed: {e}"}), 500
+
+
+@app.get("/api/trainer/dashboard")
+def api_trainer_dashboard():
+    """Aggregated stats: totals, due/new/mastered, streak, accuracy, weak spots."""
+    from server import trainer
+    try:
+        return jsonify(trainer.dashboard(trainer._parse_filters(request.args)))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"dashboard failed: {e}"}), 500
+
+
+@app.get("/api/trainer/list")
+def api_trainer_list():
+    from server import trainer
+    try:
+        limit = max(1, min(500, int(request.args.get("limit") or 200)))
+        return jsonify({"exercises": trainer.list_exercises(trainer._parse_filters(request.args), limit)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/trainer/queue")
+def api_trainer_queue():
+    """Next N exercises for a session (due first, then new, capped)."""
+    from server import trainer
+    try:
+        limit = max(1, min(60, int(request.args.get("limit") or 8)))
+        queue = trainer.next_queue(limit, trainer._parse_filters(request.args))
+        return jsonify({"queue": queue})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.post("/api/trainer/result")
+def api_trainer_result():
+    """Grade an attempt (Again=0/Hard=2/Good=4/Easy=5) and update the schedule."""
+    from server import trainer
+    data = request.get_json(force=True, silent=True) or {}
+    ex_id = (data.get("exerciseId") or data.get("id") or "").strip()
+    if not ex_id:
+        return jsonify({"error": "missing exerciseId"}), 400
+    try:
+        quality = int(data.get("quality", 0))
+        ms = max(0, int(data.get("ms", 0) or 0))
+        return jsonify(trainer.record_attempt(ex_id, quality, data.get("playedUci") or "", ms))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"record failed: {e}"}), 500
+
+
+@app.get("/api/trainer/history")
+def api_trainer_history():
+    from server import trainer
+    try:
+        limit = max(1, min(200, int(request.args.get("limit") or 50)))
+        return jsonify({"history": trainer.attempt_history(limit)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/trainer/sources")
+def api_trainer_sources():
+    from server import trainer
+    return jsonify({"sources": trainer.sources_list()})
+
+
+@app.post("/api/trainer/detach")
+def api_trainer_detach():
+    """Drop all exercises exclusively sourced from a deleted library game."""
+    from server import trainer
+    data = request.get_json(force=True, silent=True) or {}
+    source_id = (data.get("sourceId") or "").strip()
+    if not source_id:
+        return jsonify({"error": "missing sourceId"}), 400
+    try:
+        return jsonify(trainer.detach_source(source_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 _rjobs = {}
 _rjobs_lock = threading.Lock()
 
