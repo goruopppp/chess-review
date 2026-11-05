@@ -1210,9 +1210,14 @@
       if (!ex || !Array.isArray(ex.moves)) return false;
       if (state.review) {
         if (typeof ex.fromPly !== "number" || ex.fromPly < 0 || ex.fromPly > state.review.moves.length) return false;
-      } else if (!state.customFen) return false;
+      } else if (!state.customFen) {
+        // bare analysis board: the line can only be restored from the start position
+        if (ex.baseFen !== START_FEN) return false;
+        ex.fromPly = 0;
+      }
       const from = Math.max(0, Math.min(ex.fromPly | 0, state.review ? state.review.moves.length : 0));
-      const baseFen = state.customFen ? state.customFen : state.review.positions[from].fen;
+      const baseFen = state.customFen ? state.customFen
+        : (state.review ? state.review.positions[from].fen : START_FEN);
       if (!baseFen || ex.baseFen !== baseFen) return false;
       gotoPly(from, true);   // keepExplore: reuses graph/highlight/pill plumbing
       enterExplore();
@@ -1268,6 +1273,7 @@
         toast("Custom position restored", 3000);
         return true;
       }
+      if (replayExplore()) return true; // bare analysis line from the start position
     } catch (e) { /* corrupt session - start fresh */ }
     return false;
   }
