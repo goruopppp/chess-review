@@ -2633,6 +2633,7 @@
       const tok = $("setLichessToken").value.trim();
       if (tok) {
         await post("/api/lichess_token", { token: tok });
+        lichessTokenSave(tok);
         $("setLichessToken").value = "";
         explorerCache.clear();
         updateTokenStatus();
@@ -2642,11 +2643,33 @@
       toast("Settings saved");
     } catch (e) { toast("Failed: " + e.message); }
   };
+  /* the Lichess token is owned by the browser (localStorage) and re-seeded into
+     the server on every boot. Hosted copies (Render etc.) wipe their container
+     disk on restart, so the server alone is not durable enough for it. */
+  function lichessTokenLocal() {
+    try { return (localStorage.getItem("crs_lichess_token") || "").trim(); } catch (e) { return ""; }
+  }
+  function lichessTokenSave(tok) {
+    try {
+      if (tok) localStorage.setItem("crs_lichess_token", tok);
+      else localStorage.removeItem("crs_lichess_token");
+    } catch (e) { /* no storage */ }
+  }
   async function updateTokenStatus() {
+    const local = lichessTokenLocal();
+    let set = false;
     try {
       const res = await api("/api/lichess_token");
-      $("tokenStatus").textContent = res.set ? "A token is set." : "No token set.";
-    } catch { $("tokenStatus").textContent = ""; }
+      set = !!res.set;
+      // a freshly restarted server lost its token: re-seed it from the browser
+      if (local && !set) {
+        try {
+          await post("/api/lichess_token", { token: local });
+          set = true;
+        } catch (e) { /* keep going with the local copy */ }
+      }
+    } catch { set = false; }
+    $("tokenStatus").textContent = (set || local) ? "A token is set." : "No token set.";
   }
   // picker helper: mark the active option and apply instantly on click
   function bindPicker(id, onPick) {
