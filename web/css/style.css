@@ -1010,3 +1010,33 @@ body { -webkit-tap-highlight-color: transparent; }
 /* ---------- "play vs engine" active state on the sidebar button (v57) ---------- */
 .side-btn.bot-on { background: var(--accent); color: #fff; }
 .side-btn.bot-on:hover { background: var(--accent-hover); color: #fff; }
+
+/* ---------- Puzzle tab (v60) ---------- */
+.pz-controls { display: flex; gap: 8px; align-items: center; margin: 2px 0 10px; }
+.pz-controls .select { flex: 1; min-width: 0; }
+.pz-solvedbar {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  background: color-mix(in srgb, var(--green) 18%, var(--panel2)); border: 1px solid var(--green);
+  border-radius: var(--radius); padding: 8px 12px; margin: 0 0 10px;
+  animation: pz-pop 0.3s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+@keyframes pz-pop { 0% { transform: scale(0.85); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+.pz-nextbtn { background: var(--green); color: #0e1f10; border-color: transparent; }
+.pz-nextbtn:hover { background: color-mix(in srgb, var(--green) 88%, #fff); }
+.pz-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 13px; }
+.pz-topline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.pz-rating {
+  font-weight: 800; font-size: 13px; color: #111; background: #ebced1; border-radius: 6px; padding: 2px 9px;
+  font-variant-numeric: tabular-nums;
+}
+.pz-themes { display: flex; gap: 5px; flex-wrap: wrap; }
+.pz-theme-chip {
+  font-size: 10.5px; font-weight: 600; color: var(--muted); background: var(--panel2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 8px; white-space: nowrap;
+}
+.pz-turn { font-size: 13px; font-weight: 650; margin: 2px 0 10px; color: var(--text); }
+.pz-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.pz-stats { display: flex; gap: 12px; margin-top: 10px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pz-stats b { color: var(--text); }
+.pz-stats .on { color: var(--green); }
+.pz-stats .bad { color: #e4562b; }
