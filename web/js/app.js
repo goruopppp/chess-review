@@ -264,7 +264,10 @@
   }
 
   function currentFen() {
-    if (state.explore && state.explore.moves.length) return state.explore.moves[state.explore.moves.length - 1].fen;
+    if (state.explore) {
+      if (state.explore.moves.length) return state.explore.moves[state.explore.moves.length - 1].fen;
+      if (state.explore.baseFen) return state.explore.baseFen; // idle explore: analysis-ready position
+    }
     if (state.customFen && !state.review) return state.customFen;
     if (!state.review) return null;
     return state.review.positions[state.ply].fen;
@@ -469,7 +472,8 @@
   function enterExplore(firstMove) {
     state.explore = {
       fromPly: state.ply,
-      baseFen: currentFen(),
+      // bare board (no review / custom position): analyze from whatever is on the board
+      baseFen: currentFen() || board.fen || START_FEN,
       moves: firstMove ? [firstMove] : [],
       lastEval: null, lines: null, linesFen: null,
     };
@@ -489,7 +493,9 @@
   }
 
   async function onMoveAttempt(mv, from, to) {
-    if (!state.review && !state.customFen) { toast("Load a game first (New Review)"); return; }
+    // analysis is always available: on a bare board (no game loaded) playing a
+    // move simply opens explore mode from the current position
+    if (!currentFen() && !state.quiz && !state.repTrain) enterExplore();
     // multiple matching moves = promotion choice
     const matches = board.legal.filter((m) => m.uci.startsWith(from + to));
     let chosen = mv;
@@ -2882,7 +2888,11 @@
     .catch((e) => toast("Engine list failed: " + e.message, 5000))
     .then(async () => {
       if (!(await restoreSession())) {
+        // first visit / nothing saved: open straight into analysis mode so the
+        // board is playable immediately and the engine's top moves stream in
         board.setPosition("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+        enterExplore();
+        renderBoard();
       }
       repRestoreLast(); // reopen the last built/opened repertoire (tab + preview)
       loadSamples();
