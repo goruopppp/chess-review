@@ -17,6 +17,7 @@
     liveOn: localStorage.getItem("crs_live") !== "0",
     liveSuspended: false,  // true while a full review is running
     playBot: false,        // sidebar "play vs engine" session (engine answers your moves)
+    playBotColor: "white", // the color YOU play in a bot session
     hintUci: null,         // pending Hint arrow during a play session (uci)
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -429,6 +430,12 @@
     saveExplore();
     updateExploreInfo();
     renderBoard();
+    // in a bot game: an undo/redo that lands on the engine's turn hands the
+    // move straight back to the engine, so the session keeps flowing
+    if (state.playBot) {
+      const mover = (currentFen().split(" ")[1] || "w") === "w" ? "white" : "black";
+      if (mover !== state.playBotColor) engineReply();
+    }
   }
   function startAutoplay() {
     if (state.playing || !state.review) return;
@@ -656,25 +663,36 @@
 
   /* ---------------- play vs engine (a keyed sidebar session, not analysis) ---------------- */
   function updatePlayBotUi() {
-    if ($("eloSelect")) $("eloSelect").hidden = !state.playBot;
+    const side = $("botSideSelect");
+    if (side) {
+      if (side.value !== state.playBotColor) side.value = state.playBotColor;
+      side.hidden = !state.playBot;
+    }
     if ($("btnBotHint")) $("btnBotHint").hidden = !state.playBot;
     $("btnPlayBot").classList.toggle("bot-on", !!state.playBot);
     $("btnPlayBot").title = state.playBot
       ? "Stop playing the engine"
       : "Play vs engine - the engine answers your moves";
     const info = $("exploreMoveInfo");
-    if (info) info.textContent = state.playBot
-      ? "You play White - the engine answers. Hit Hint for a pointer"
-      : "engine evaluates as you play";
+    if (info) info.textContent = !state.playBot
+      ? "engine evaluates as you play"
+      : state.playBotColor === "black"
+        ? "You play Black - the engine opens as White"
+        : "You play White - the engine answers. Hit Hint for a pointer";
   }
-  function startPlayBot() {
-    if (state.playBot) return;
+  function startPlayBot(color) {
+    state.playBotColor = color === "black" ? "black" : "white";
     goHome();                 // leave every mode cleanly, land on the start position
     state.playBot = true;
     state.hintUci = null;
+    if (state.playBotColor === "black") {
+      board.flip();           // your pieces at the bottom
+      state.orientation = board.orientation;
+    }
     updatePlayBotUi();
-    renderBoard();            // defaultArrows() now suppresses the engine arrows
-    toast("Playing the engine - make your first move (White)", 3500);
+    renderBoard();            // defaultArrows() suppresses the engine arrows
+    if (state.playBotColor === "black") engineReply();    // the engine opens as White
+    else toast("Playing the engine - make your first move (White)", 3500);
   }
   function stopPlayBot() {
     if (!state.playBot) return;
@@ -2868,7 +2886,15 @@
   $("btnNext").onclick = () => step(1);
   $("btnPlay").onclick = () => (state.playing ? stopAutoplay() : startAutoplay());
   $("btnExitExplore").onclick = () => { if (state.playBot) stopPlayBot(); exitExplore(); switchTab("report"); };
-  $("btnPlayBot").onclick = () => (state.playBot ? stopPlayBot() : startPlayBot());
+  $("btnPlayBot").onclick = () => {
+    if (state.playBot) return stopPlayBot();
+    startPlayBot(($("botSideSelect") && $("botSideSelect").value) || "white");
+  };
+  $("botSideSelect").onchange = () => {
+    if (!state.playBot) return;
+    const c = $("botSideSelect").value === "black" ? "black" : "white";
+    if (c !== state.playBotColor) { stopPlayBot(); startPlayBot(c); toast(`New game - now playing as ${c === "black" ? "Black" : "White"}`, 3000); }
+  };
   $("btnBotHint").onclick = botHint;
   $("btnLichessFetch").onclick = fetchLichess;
   $("btnChesscomFetch").onclick = fetchChessCom;
