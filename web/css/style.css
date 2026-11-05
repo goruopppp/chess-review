@@ -992,3 +992,17 @@ body { -webkit-tap-highlight-color: transparent; }
 .brand-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
 .brand-btn .brand-knight { transition: transform 0.15s ease; }
 .brand-btn:active .brand-knight { transform: scale(0.9); }
+
+/* ---------- opening-name chip (topbar, v56) ---------- */
+.opening-chip {
+  margin-left: auto; align-self: center;
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; font-weight: 600; line-height: 1;
+  padding: 4px 9px; border-radius: 999px;
+  background: var(--panel2); border: 1px solid var(--border);
+  color: var(--muted); cursor: default; user-select: none;
+}
+.opening-chip:hover { color: var(--text); border-color: var(--border2); }
+@media (max-width: 640px) {
+  .opening-chip { display: none; }
+}
