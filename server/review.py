@@ -364,9 +364,25 @@ def run_review(pgn_text, engine, depth=12, multipv=3, movetime=900, progress=Non
         if progress:
             progress(msg)
 
-    game = chess.pgn.read_game(io.StringIO(pgn_text))
-    if game is None or game.errors:
+    # replay the whole stream so a PGN with several games is detected instead of
+    # silently truncated to the first (python-chess errors=[] either way)
+    stream = io.StringIO(pgn_text)
+    games = []
+    while True:
+        g = chess.pgn.read_game(stream)
+        if g is None:
+            break
+        games.append(g)
+    game = games[0] if games else None
+    pgn_warnings = []
+    if len(games) > 1:
+        first_name = (games[0].headers.get("Event", "game 1") or "game 1")
+        pgn_warnings.append(f"Your PGN contains {len(games)} games - only the first "
+                           f"(\"{first_name}\") was reviewed.")
+    if game is None:
         raise ValueError("Could not parse PGN. Make sure it contains at least the moves.")
+    if game.errors:
+        pgn_warnings.append(f"{len(game.errors)} move(s) could not be parsed - they were skipped.")
     board = game.board()
     moves, boards, clocks = [], [board.copy(stack=False)], []
     node = game
@@ -552,7 +568,21 @@ def run_review(pgn_text, engine, depth=12, multipv=3, movetime=900, progress=Non
         cls_txt = f"{meta['label']}{' ' + meta['symbol'] if meta['symbol'] else ''}"
         eval_b = fmt_eval(r["cpBefore"], pos_records[idx]["mateWhite"])
         eval_a = fmt_eval(r["cpAfter"], pos_records[idx + 1]["mateWhite"])
-        node.comment = f"[{cls_txt}] {r['comment']} (eval {eval_b} → {eval_a})"
+        # keep [%clk]/[%eval] tags and anything the user wrote in the original
+        # comment (verified destruction bug: the old code overwrote node.comment)
+        orig = (node.comment or "").strip()
+        keep = ""
+        if orig:
+            keep_parts = []
+            pclk = CLK_RE.search(orig)
+            if pclk:
+                keep_parts.append(pclk.group(0))
+            plain = CLK_RE.sub("", orig)
+            plain = re.sub(r"\[%[^\]]*\]", "", plain).replace("{", "").replace("}", "").strip()
+            if plain:
+                keep_parts.insert(0, plain)
+            keep = " ".join(keep_parts)
+        node.comment = f"[{cls_txt}] {r['comment']} (eval {eval_b} → {eval_a})" + (f" | {keep}" if keep else "")
         idx += 1
     exporter = chess.pgn.StringExporter(headers=True, variations=False, comments=True)
     annotated_pgn = game.accept(exporter)
@@ -580,6 +610,7 @@ def run_review(pgn_text, engine, depth=12, multipv=3, movetime=900, progress=Non
         "summary": summary,
         "graph": graph,
         "annotatedPgn": annotated_pgn,
+        "pgnWarnings": pgn_warnings,
         "analysis": {"engine": getattr(engine, "name", "?"), "depth": depth,
                      "multipv": multipv, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")},
     }
