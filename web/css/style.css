@@ -986,3 +986,9 @@ body { -webkit-tap-highlight-color: transparent; }
     bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* ---------- clickable brand (home) ---------- */
+.brand-btn { background: none; border: none; padding: 0; cursor: pointer; color: inherit; text-align: left; }
+.brand-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+.brand-btn .brand-knight { transition: transform 0.15s ease; }
+.brand-btn:active .brand-knight { transform: scale(0.9); }
