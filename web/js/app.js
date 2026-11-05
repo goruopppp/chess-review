@@ -16,6 +16,8 @@
     live: { fen: null, lines: null, engine: null, depth: null, cycle: 0 },
     liveOn: localStorage.getItem("crs_live") !== "0",
     liveSuspended: false,  // true while a full review is running
+    playBot: false,        // sidebar "play vs engine" session (engine answers your moves)
+    hintUci: null,         // pending Hint arrow during a play session (uci)
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const liveActive = () => state.liveOn && !state.liveSuspended && !editor.active && !state.quiz && !state.repTrain;
@@ -228,6 +230,12 @@
 
   function defaultArrows() {
     if (!state.arrowsOn || state.quiz || state.repTrain) return [];
+    if (state.playBot) {
+      // playing: no engine arrows leaking the answer - only a requested Hint
+      return state.hintUci
+        ? [{ uci: state.hintUci, color: "rgba(255,168,46,.92)", width: 0.2, opacity: 0.92 }]
+        : [];
+    }
     return currentLines()
       .filter((ln) => ln.pv && ln.pv.length)
       .slice(0, 3)
@@ -625,6 +633,7 @@
   /* ---------------- "home": plain start-position analysis ---------------- */
   function goHome() {
     // leave anything that owns the board, using each mode's own exit routine
+    if (state.playBot) stopPlayBot();
     if (state.quiz) quizQuit();
     if (state.repTrain) repTrainQuit();
     if (state.linePlay) stopLinePlay();
@@ -643,6 +652,56 @@
     board.setPosition(START_FEN);
     enterExplore(); // analysis-ready, Engine tab active -> top moves stream in
     renderBoard();
+  }
+
+  /* ---------------- play vs engine (a keyed sidebar session, not analysis) ---------------- */
+  function updatePlayBotUi() {
+    const chk = $("chkPlayEngine");
+    const lbl = chk && chk.closest(".chk");
+    if (chk) chk.checked = !!state.playBot;
+    if (lbl) lbl.hidden = !!state.playBot;   // the sidebar button owns the toggle now
+    if ($("btnBotHint")) $("btnBotHint").hidden = !state.playBot;
+    $("btnPlayBot").classList.toggle("bot-on", !!state.playBot);
+    $("btnPlayBot").title = state.playBot
+      ? "Stop playing the engine"
+      : "Play vs engine - the engine answers your moves";
+    const info = $("exploreMoveInfo");
+    if (info) info.textContent = state.playBot
+      ? "You play White - the engine answers. Hit Hint for a pointer"
+      : "engine evaluates as you play";
+  }
+  function startPlayBot() {
+    if (state.playBot) return;
+    goHome();                 // leave every mode cleanly, land on the start position
+    state.playBot = true;
+    state.hintUci = null;
+    updatePlayBotUi();
+    renderBoard();            // defaultArrows() now suppresses the engine arrows
+    toast("Playing the engine - make your first move (White)", 3500);
+  }
+  function stopPlayBot() {
+    if (!state.playBot) return;
+    state.playBot = false;
+    state.hintUci = null;
+    updatePlayBotUi();
+  }
+  /* one-tap hint: mark the engine's suggested move; lives until you move again */
+  async function botHint() {
+    if (!state.playBot) return;
+    const fen = currentFen();
+    if (!fen) return;
+    if (state.hintUci) { state.hintUci = null; renderBoard(); return; }   // toggle off
+    try {
+      const res = await post("/api/eval", {
+        fen, engine: $("engineSelect").value, depth: 10, movetime: 600, multipv: 1,
+      });
+      if (!state.playBot || currentFen() !== fen) return;
+      const ln = res && res.lines && res.lines[0];
+      if (!ln || !ln.pv || !ln.pv.length) { toast("No hint available in this position"); return; }
+      state.hintUci = ln.pv[0];
+      renderBoard();
+      if (ln.san && ln.san[0]) toast(`Hint: ${ln.san[0]} - click Hint again to hide`, 3500);
+    } catch (e) { toast("Hint failed - engine busy"); }
   }
 
   function exitExplore(rerender) {
@@ -667,6 +726,7 @@
     const legalCount = board.legal.length;
     if (state.quiz) return quizGuess(chosen);
     if (state.repTrain) return repTrainGuess(chosen);
+    state.hintUci = null;      // moving consumes the Hint arrow
     // following the game line?
     if (state.review && (!state.explore || state.explore.moves.length === 0)) {
       if (state.ply < state.review.moves.length && state.review.moves[state.ply].uci === chosen.uci) {
@@ -2814,7 +2874,9 @@
   $("btnPrev").onclick = () => step(-1);
   $("btnNext").onclick = () => step(1);
   $("btnPlay").onclick = () => (state.playing ? stopAutoplay() : startAutoplay());
-  $("btnExitExplore").onclick = () => { exitExplore(); switchTab("report"); };
+  $("btnExitExplore").onclick = () => { if (state.playBot) stopPlayBot(); exitExplore(); switchTab("report"); };
+  $("btnPlayBot").onclick = () => (state.playBot ? stopPlayBot() : startPlayBot());
+  $("btnBotHint").onclick = botHint;
   $("btnLichessFetch").onclick = fetchLichess;
   $("btnChesscomFetch").onclick = fetchChessCom;
   $("chesscomUser").addEventListener("keydown", (e) => { if (e.key === "Enter") fetchChessCom(); });
