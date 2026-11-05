@@ -2132,8 +2132,9 @@
     return false;
   }
 
-  /* ---- clicked-line preview: jump straight to the clicked position ---- */
+  /* ---- clicked-line preview: fast replay of the line up to the clicked move ---- */
   const REP_HL = "rgba(38,194,163,.9)"; // teal, clearly distinct from engine/user arrows
+  const REP_STEP_MS = 120, REP_END_MS = 200; // replay pace: one move every ~120 ms
   let repPreviewSeq = 0;
 
   function repStopPreview() {
@@ -2183,13 +2184,18 @@
     try { fens = await repLineFens(line); } catch (e) { return; }
     if (seq !== repPreviewSeq) return;            // clicked something else meanwhile
     if (!$("quizPanel").hidden || state.repTrain) return; // training took over
-    const anim = animEnabled();                   // instant jump: no glide animation
-    if (anim && board.setAnimation) board.setAnimation(false);
-    board.setPosition(fens[mi + 1], { lastMove: line.moves[mi].uci, badge: null, arrows: [], legal: [] });
-    board.userSquares = [{ sq: line.moves[mi].uci.slice(0, 2), color: REP_HL },
-                         { sq: line.moves[mi].uci.slice(2, 4), color: REP_HL }];
-    board.renderArrows();
-    if (anim && board.setAnimation) board.setAnimation(true);
+    // walk the line move by move with the board's glide animation, just faster
+    for (let k = 0; k <= mi; k++) {
+      const uci = line.moves[k].uci;
+      board.setPosition(fens[k + 1], { lastMove: uci, badge: null, arrows: [], legal: [] });
+      board.userSquares = [{ sq: uci.slice(0, 2), color: REP_HL }, { sq: uci.slice(2, 4), color: REP_HL }];
+      board.renderArrows();
+      const end = Date.now() + (k === mi ? REP_END_MS : REP_STEP_MS);
+      while (Date.now() < end) {
+        if (seq !== repPreviewSeq) return;
+        await sleep(25);
+      }
+    }
   }
 
   // background precompute: fill every line's FEN cache right after a build/restore
