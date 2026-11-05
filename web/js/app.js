@@ -394,7 +394,33 @@
     saveSessionPos();
   }
 
-  function step(d) { gotoPly(state.ply + d); stopAutoplay(); }
+  function step(d) {
+    stopAutoplay();
+    const ex = state.explore;                    // analysis mode: arrows walk the
+    if (ex) {                                    // explored moves back and forward
+      if (ex.moves.length) return exploreStep(d);
+      if (d > 0 && ex.redo && ex.redo.length) return exploreStep(d);
+      // nothing explored: ArrowRight just fell back to game navigation below
+      if (!state.review && d < 0) return;        // already at the start position
+    }
+    gotoPly(state.ply + d);
+  }
+
+  /* undo/redo for explored moves: popping keeps the entry (cls stays), the live
+     loop re-fills eval lines for the resulting position */
+  function exploreStep(d) {
+    const ex = state.explore;
+    if (!ex) return;
+    if (d < 0 && ex.moves.length) {
+      (ex.redo = ex.redo || []).push(ex.moves.pop());
+    } else if (d > 0 && ex.redo && ex.redo.length) {
+      ex.moves.push(ex.redo.pop());
+    } else { return; }
+    ex.lastEval = null; ex.lines = null; ex.linesFen = null;
+    saveExplore();
+    updateExploreInfo();
+    renderBoard();
+  }
   function startAutoplay() {
     if (state.playing || !state.review) return;
     killLinePlay();
@@ -542,7 +568,7 @@
       const entry = { uci: chosen.uci, san: res.san, fen: res.fen, legalCount, checkmate: res.checkmate };
       playMoveSound(res.san);
       if (!state.explore) { enterExplore(entry); saveExplore(); }
-      else { state.explore.moves.push(entry); saveExplore(); }
+      else { state.explore.moves.push(entry); state.explore.redo = []; saveExplore(); }
       classifyLastExploreMove();   // don't wait for the live loop: a delivered mate
                                    // never yields eval lines, so it must run now
       if ($("chkPlayEngine").checked) {
@@ -2691,6 +2717,11 @@
   $("setSave").onclick = async () => {
     try {
       await post("/api/settings", { threads: +$("setThreads").value || 1, hash: +$("setHash").value || 128 });
+      try {   // persist engine settings in the browser like the Lichess token -
+              // the server only keeps them in RAM (hosted disks wipe)
+        localStorage.setItem("crs_threads", +$("setThreads").value || 1);
+        localStorage.setItem("crs_hash", +$("setHash").value || 128);
+      } catch (e) { /* private mode */ }
       const tok = $("setLichessToken").value.trim();
       if (tok) {
         await post("/api/lichess_token", { token: tok });
@@ -2731,6 +2762,18 @@
       }
     } catch { set = false; }
     $("tokenStatus").textContent = (set || local) ? "A token is set." : "No token set.";
+  }
+  /* engine threads/RAM: same treatment as the token - the server holds them
+     only in memory, so the browser owns the values and re-seeds on every boot */
+  function restoreSettings() {
+    let th = 0, hs = 0;
+    try {
+      th = +localStorage.getItem("crs_threads") || 0;
+      hs = +localStorage.getItem("crs_hash") || 0;
+    } catch (e) { /* no storage */ }
+    if (th) $("setThreads").value = th;   // the settings modal shows them too
+    if (hs) $("setHash").value = hs;
+    if (th || hs) post("/api/settings", { threads: th || 1, hash: hs || 128 }).catch(() => {});
   }
   // picker helper: mark the active option and apply instantly on click
   function bindPicker(id, onPick) {
@@ -2906,6 +2949,7 @@
   applySoundSetting();
   buildTray();
   updateLiveBtn();
+  restoreSettings();
   updateTokenStatus();
   liveEngineLoop();
   loadEngines()
