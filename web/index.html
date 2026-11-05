@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=62">
+<link rel="stylesheet" href="css/style.css?v=63">
 </head>
 <body>
 <div class="app-shell">
@@ -188,6 +188,7 @@
       <button class="tab" data-tab="explorer" role="tab" aria-selected="false" type="button">Explorer</button>
       <button class="tab" data-tab="repertoire" role="tab" aria-selected="false" type="button">Repertoire</button>
       <button class="tab" data-tab="puzzle" role="tab" aria-selected="false" type="button">Puzzle</button>
+      <button class="tab" data-tab="trainer" role="tab" aria-selected="false" type="button">Trainer</button>
     </div>
 
     <div class="tab-body" id="tab-report" role="tabpanel">
@@ -331,6 +332,91 @@
         <div class="pz-stats" id="pzStats"></div>
       </div>
       <p class="text-small text-muted">Puzzles supplied by lichess.org. Your streak and local puzzle rating live in this browser. If lichess is slow or offline, the last fresh puzzle for the selected theme is served from cache.</p>
+    </div>
+
+    <div class="tab-body" id="tab-trainer" role="tabpanel" hidden>
+      <!-- ============ DASHBOARD ============ -->
+      <div id="trainerDash">
+        <div class="tr-hero">
+          <div class="tr-hero-top">
+            <div>
+              <h3 class="tr-title">Mistake Trainer</h3>
+              <p class="tr-sub">Master your own blunders — spaced repetition built from your reviewed games.</p>
+            </div>
+            <div class="tr-sync">
+              <button id="btnTrainerSync" class="btn btn-sm" type="button">Sync saved games</button>
+            </div>
+          </div>
+          <div class="tr-stats" id="trHeroStats"></div>
+          <div class="tr-filters">
+            <select id="trFilterCls" class="select" title="Mistake type">
+              <option value="">All mistake types</option>
+              <option value="blunder">Blunders</option>
+              <option value="miss">Missed wins</option>
+              <option value="mistake">Mistakes</option>
+            </select>
+            <select id="trFilterSide" class="select" title="Whose mistake">
+              <option value="">Both sides</option>
+              <option value="white">White had the mistake</option>
+              <option value="black">Black had the mistake</option>
+            </select>
+            <select id="trFilterStatus" class="select" title="Schedule state">
+              <option value="">All states</option>
+              <option value="due">Due now</option>
+              <option value="new">New</option>
+              <option value="learning">Learning</option>
+              <option value="review">Review</option>
+              <option value="mastered">Mastered</option>
+            </select>
+            <select id="trFilterSource" class="select" title="Source game">
+              <option value="">All games</option>
+            </select>
+          </div>
+          <button id="btnTrainerStart" class="btn btn-primary tr-start" type="button">Start training session</button>
+          <p class="tr-hintline">Positions come from your reviewed games. Each correct answer schedules the exercise further out — blunders you keep missing come back within minutes.</p>
+        </div>
+        <div class="tr-weak" id="trWeakCard" hidden></div>
+        <div class="tr-list-head"><span>Exercises</span><span class="text-small text-muted" id="trListMeta"></span></div>
+        <div class="tr-list" id="trList"></div>
+        <div class="tr-history-wrap">
+          <div class="tr-list-head"><span>Recent attempts</span></div>
+          <div id="trHistory" class="tr-history"></div>
+        </div>
+      </div>
+      <!-- ============ SESSION ============ -->
+      <div id="trainerSession" hidden>
+        <div class="tr-sess-head">
+          <button id="btnTrainerQuit" class="btn btn-xs" type="button">Quit</button>
+          <div class="tr-progress"><div class="tr-progress-fill" id="trProgressFill"></div></div>
+          <span class="tr-sess-count" id="trSessCount">1 / 1</span>
+          <button id="btnTrainerSkip" class="btn btn-xs" type="button">Skip</button>
+        </div>
+        <div class="tr-turn" id="trTurn">White to move — find the best move!</div>
+        <div class="tr-meta" id="trMeta"></div>
+        <div class="tr-actions">
+          <button id="trHintBtn" class="btn btn-sm" type="button">Hint <span class="text-muted">(show the piece)</span></button>
+          <button id="trRevealBtn" class="btn btn-sm" type="button">Show solution</button>
+        </div>
+        <div class="tr-feedback" id="trFeedback" hidden>
+          <div class="tr-verdict" id="trVerdict"></div>
+          <div class="tr-feedback-body" id="trFeedbackBody"></div>
+          <div class="tr-grading" id="trGrading">
+            <button class="btn btn-sm tr-again" id="trAgain" type="button">Again</button>
+            <button class="btn btn-sm tr-hard" id="trHard" type="button">Hard</button>
+            <button class="btn btn-sm tr-good" id="trGood" type="button">Good</button>
+            <button class="btn btn-sm tr-easy" id="trEasy" type="button">Easy</button>
+          </div>
+        </div>
+      </div>
+      <!-- ============ SESSION DONE ============ -->
+      <div id="trainerDone" hidden>
+        <div class="tr-done">
+          <div class="tr-done-mark">&#10004;</div>
+          <h3 class="tr-done-title">Session complete</h3>
+          <div class="tr-done-stats" id="trDoneStats"></div>
+          <button id="btnTrainerDoneBack" class="btn btn-primary" type="button">Back to trainer</button>
+        </div>
+      </div>
     </div>
 
     <div class="panel-foot">
@@ -570,6 +656,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=62"></script>
+<script src="js/app.js?v=63"></script>
 </body>
 </html>
