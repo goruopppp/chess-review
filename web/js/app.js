@@ -309,6 +309,7 @@
     renderTopMoves();
     if (state.customFen && !editor.active) renderCustomMoves();
     scheduleExplorer();
+    scheduleOpeningChip();
     if (state.quiz) { quizRenderBoard(); return; }
     if (state.repTrain) { repTrainRenderBoard(); return; }
     // legality (dots / check / mate banner) arrives async - never blocks pieces
@@ -503,6 +504,108 @@
     renderBoard();       // restore the position you were reading
   }
 
+  /* ---------- save the board as a PNG (reads the live board DOM) ---------- */
+  async function savePositionImage() {
+    const el = board.el;
+    if (!el || !board.fen) { toast("Nothing on the board yet"); return; }
+    const br = el.getBoundingClientRect();
+    if (!br.width || !br.height) return;
+    const S = 720, sq = S / 8;
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = S;
+    const g = cv.getContext("2d");
+    const cs = getComputedStyle(el);
+    const LIGHT = (cs.getPropertyValue("--light-sq") || "#ebecd0").trim() || "#ebecd0";
+    const DARK = (cs.getPropertyValue("--dark-sq") || "#739552").trim() || "#739552";
+    const sqNodes = el.querySelectorAll(".sq");
+    const files = "abcdefgh";
+    const whiteBottom = (state.orientation || board.orientation || "white") !== "black";
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const darkSq = ((r + c) % 2) === 1;
+        const node = sqNodes[r * 8 + c];
+        // prefer the live square color so themes/orientation always match
+        g.fillStyle = node ? getComputedStyle(node).backgroundColor
+                           : (darkSq ? DARK : LIGHT);
+        g.fillRect(c * sq, r * sq, sq, sq);
+      }
+    }
+    // coordinates in the corners of the edge squares
+    g.font = `700 ${Math.round(sq * 0.17)}px ui-sans-serif, system-ui, sans-serif`;
+    for (let i = 0; i < 8; i++) {
+      let node = sqNodes[7 * 8 + i];
+      g.fillStyle = node && node.classList.contains("dark") ? LIGHT : DARK;
+      g.fillText(files[whiteBottom ? i : 7 - i], i * sq + 3, S - 4);   // file letters
+      node = sqNodes[i * 8];
+      g.fillStyle = node && node.classList.contains("dark") ? LIGHT : DARK;
+      g.fillText(String(whiteBottom ? 8 - i : i + 1), 3, i * sq + sq * 0.2); // rank numbers
+    }
+    // pieces: sample the rendered piece nodes
+    for (const node of el.querySelectorAll(".piece")) {
+      const pr = node.getBoundingClientRect();
+      if (!pr.width || !pr.height) continue;
+      const x = (pr.left - br.left) / br.width * S;
+      const y = (pr.top - br.top) / br.height * S;
+      const w = pr.width / br.width * S, h = pr.height / br.height * S;
+      const img = node.querySelector("img");
+      try {
+        if (img) {
+          if (img.complete && img.naturalWidth) g.drawImage(img, x, y, w, h);
+          else { await new Promise((ok, err) => { img.onload = ok; img.onerror = err; setTimeout(ok, 2500); });
+                 g.drawImage(img, x, y, w, h); }
+        } else {
+          const fb = node.querySelector(".fallback");
+          const glyph = ((fb && fb.textContent) || node.textContent || "").trim();
+          if (glyph) {
+            g.fillStyle = getComputedStyle(fb || node).color || "#222";
+            g.font = `${Math.round(h * 0.8)}px serif`;
+            g.textAlign = "center"; g.textBaseline = "middle";
+            g.fillText(glyph, x + w / 2, y + h * 0.54);
+          }
+        }
+      } catch (e) { /* skip a piece that cannot be rasterized */ }
+    }
+    const blob = await new Promise((ok) => cv.toBlob(ok, "image/png"));
+    if (!blob) { toast("Could not export the board"); return; }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "chess-" + new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-") + ".png";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    toast("Board image saved");
+  }
+
+  /* ---------- share-link for the current position ---------- */
+  function fallbackCopy(text, done) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); done(); } catch (e) { toast("Copy failed"); }
+    ta.remove();
+  }
+  function copyShareLink() {
+    const fen = currentFen();
+    if (!fen) return;
+    const url = `${location.origin}${location.pathname}#fen=${fen.replace(/ /g, "_")}`;
+    const done = () => toast("Link copied - anyone opening it lands on this exact position");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done).catch(() => fallbackCopy(url, done));
+    } else fallbackCopy(url, done);
+  }
+  // boot: accept "#fen=<FEN>" links (spaces encoded as underscores)
+  function maybeLoadShareLink() {
+    if (!location.hash.startsWith("#fen=")) return false;
+    let raw = "";
+    try { raw = decodeURIComponent(location.hash.slice(5)); } catch (e) { return false; }
+    raw = raw.replace(/_/g, " ").trim().replace(/\s+/g, " ");
+    const f = raw.split(" ");
+    if (f.length < 4 || f[0].split("/").length !== 8 || (f[1] !== "w" && f[1] !== "b")) return false;
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { /* keep hash */ }
+    state.customFen = raw;
+    try { localStorage.setItem("crs_last_custom", raw); } catch (e) { /* private mode */ }
+    return true;
+  }
+
   /* ---------------- explore mode ---------------- */
   function enterExplore(firstMove) {
     state.explore = {
@@ -594,10 +697,12 @@
   async function engineReply() {
     const fen = currentFen();
     const preset = DEPTHS[$("depthSelect").value] || DEPTHS.balanced;
+    const elo = +(($("eloSelect") && $("eloSelect").value) || 0);
     try {
       const res = await post("/api/eval", {
         fen, engine: $("engineSelect").value,
-        depth: Math.min(10, preset.depth), movetime: 500, multipv: 3,
+        depth: elo ? 8 : Math.min(10, preset.depth), movetime: elo ? 350 : 500,
+        multipv: 3, elo,
       });
       if (!res.lines || !res.lines.length || !res.lines[0].pv.length) return;
       const uci = res.lines[0].pv[0];
@@ -2068,7 +2173,7 @@
   }
 
   function renderLibrary() {
-    const list = libLoad();
+    const list = libFilter(libLoad());
     const el = $("libList");
     const chart = $("libChart");
     $("btnLibSave").disabled = !state.review;
@@ -2096,7 +2201,10 @@
     }
 
     if (!list.length) {
-      el.innerHTML = `<div class="empty-hint small">No saved games yet. Analyze a game, then click "Save current game".</div>`;
+      const q = (($("libSearch") && $("libSearch").value) || "").trim();
+      el.innerHTML = `<div class="empty-hint small">${q
+        ? `No saved games match "${q.replace(/[<>&"]/g, "")}".`
+        : `No saved games yet. Analyze a game, then click "Save current game".`}</div>`;
       return;
     }
     el.innerHTML = list.map((g) => {
@@ -2136,6 +2244,43 @@
     if (hasPieces && rendered === 0) board.renderPieces();
   }
   setInterval(piecesWatchdog, 1500);
+
+  /* ---------- topbar opening-name chip (v56) ----------
+     Reuses the shared GET /api/explorer route (cached server-side), so the name
+     costs its lookup only on positions the user actually reaches. The chip
+     stays hidden while there is no name (custom/endgame positions) or the
+     explorer API is unreachable. */
+  const openingChipState = { fen: "", timer: 0 };
+  function scheduleOpeningChip() {
+    clearTimeout(openingChipState.timer);
+    const chip = $("openingChip");
+    if (!chip) return;
+    const fen = currentFen();
+    if (!fen) { chip.hidden = true; return; }
+    if (openingChipState.fen === fen) return;        // same position, nothing to do
+    chip.hidden = true;
+    openingChipState.timer = setTimeout(async () => {
+      const f = currentFen();
+      if (!f) return;
+      openingChipState.fen = f;
+      let name = "";
+      try {
+        const res = await api("/api/explorer?fen=" + encodeURIComponent(f));
+        name = typeof res.opening === "string" ? res.opening : "";
+      } catch (e) { /* explorer offline or unauthenticated: keep the chip hidden */ }
+      if (currentFen() !== f || openingChipState.fen !== f) return;   // user moved on
+      if (name) { chip.textContent = name; chip.hidden = false; }
+    }, 500);
+  }
+
+  /* ---------- Game Library instant search (v56) ---------- */
+  function libFilter(list) {
+    const q = (($("libSearch") && $("libSearch").value) || "").trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((g) =>
+      libGameName(g).toLowerCase().includes(q) ||
+      `${g.review.game.opening || ""} ${g.review.game.Result || ""}`.toLowerCase().includes(q));
+  }
 
   function repPaint(res, opts) {
     opts = opts || {};
@@ -2663,6 +2808,9 @@
   $("btnFlip").onclick = () => { board.flip(); state.orientation = board.orientation; if (state.review) renderGameHead(); renderBoard(); };
   $("btnStart").onclick = () => { stopAutoplay(); gotoPly(0); };
   $("btnEnd").onclick = () => { stopAutoplay(); gotoPly(state.review ? state.review.moves.length : 0); };
+  $("btnShot").onclick = savePositionImage;
+  $("btnShare").onclick = copyShareLink;
+  $("libSearch").oninput = () => renderLibrary();
   $("btnPrev").onclick = () => step(-1);
   $("btnNext").onclick = () => step(1);
   $("btnPlay").onclick = () => (state.playing ? stopAutoplay() : startAutoplay());
@@ -2970,7 +3118,13 @@
   loadEngines()
     .catch((e) => toast("Engine list failed: " + e.message, 5000))
     .then(async () => {
-      if (!(await restoreSession())) {
+      if (maybeLoadShareLink()) {
+        // #fen= link: land straight in analysis mode on the shared position
+        renderAccuracySummary();
+        enterExplore();
+        renderBoard();
+        toast("Loaded shared position", 3000);
+      } else if (!(await restoreSession())) {
         // first visit / nothing saved: open straight into analysis mode so the
         // board is playable immediately and the engine's top moves stream in
         board.setPosition("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
