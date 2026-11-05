@@ -2312,66 +2312,101 @@
     toast("Solution: " + ex.bestSan, 3500);
   }
 
-  /* ---------------- Performance Lab (v64) ---------------- */
+  /* ---------------- Performance Lab (v65) — navy diagnostics ---------------- */
   const labEscape = typeof trainerEsc === "function" ? trainerEsc : ((s) =>
     String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"));
 
+  const LAB_GLYPHS = { total: "&#9822;", winrate: "&#x2655;", accuracy: "&#9822;", blunders: "&#9873;", reviewed: "&#9822;", missed: "&#8626;" };
+
   function paintLabHero(d) {
-    const cell = (v, label, cls) =>
-      `<div class="lab-stat ${cls || ""}"><b>${v}</b><span>${label}</span></div>`;
     const avgAcc = (d.avgAccuracy && d.avgAccuracy.white != null && d.avgAccuracy.black != null)
       ? Math.round((d.avgAccuracy.white + d.avgAccuracy.black) / 2) : null;
+    const wr = d.decidedGames ? d.winRate : null;
+    const wrCls = wr == null ? "accent" : wr >= 55 ? "ok" : wr < 40 ? "hot" : "warn";
     $("labHero").innerHTML =
-      cell(d.total, "imported", "accent") +
-      cell(d.decidedGames ? `${d.winRate}%` : "—", "win rate",
-           d.winRate == null ? "" : (d.winRate >= 55 ? "ok" : d.winRate < 40 ? "hot" : "")) +
-      cell(d.reviewedGames ?? "—", "reviewed", "ok") +
-      cell(avgAcc != null ? avgAcc + "%" : "—", "avg accuracy", "ok") +
-      cell(d.errorTotals.blunders || 0, "blunders", (d.errorTotals.blunders || 0) > 0 ? "hot" : "") +
-      cell(d.errorTotals.misses || 0, "missed wins", (d.errorTotals.misses || 0) > 0 ? "hot" : "");
+      `<div class="lab-hero-item"><span class="lab-hero-glyph">${LAB_GLYPHS.total}</span>`
+      + `<div class="lab-hero-num accent">${d.total}</div><div class="lab-hero-label">Games imported</div>`
+      + `<div class="lab-hero-sub">${d.reviewedGames || 0} reviewed</div></div>`
+      + `<div class="lab-hero-item"><span class="lab-hero-glyph">${LAB_GLYPHS.winrate}</span>`
+      + `<div class="lab-hero-num ${wrCls}">${wr == null ? "—" : wr + "%"}</div><div class="lab-hero-label">Win rate</div>`
+      + `<div class="lab-hero-sub">${d.decidedGames || 0} decided games</div></div>`
+      + `<div class="lab-hero-item"><span class="lab-hero-glyph">${LAB_GLYPHS.accuracy}</span>`
+      + `<div class="lab-hero-num ok">${avgAcc != null ? avgAcc + "%" : "—"}</div><div class="lab-hero-label">Avg accuracy</div>`
+      + `<div class="lab-hero-sub">ACPL ${d.avgACPL && d.avgACPL.white != null ? Math.round((d.avgACPL.white + d.avgACPL.black) / 2) : "—"}</div></div>`
+      + `<div class="lab-hero-item"><span class="lab-hero-glyph">${LAB_GLYPHS.blunders}</span>`
+      + `<div class="lab-hero-num ${(d.errorTotals.blunders || 0) > 0 ? "hot" : "ok"}">${d.errorTotals.blunders || 0}</div>`
+      + `<div class="lab-hero-label">Blunders (all games)</div>`
+      + `<div class="lab-hero-sub">${d.errorTotals.misses || 0} missed wins</div></div>`;
   }
+
+  function paintLabPhaseBars(d) {
+    const el = $("labPhaseBars");
+    const meta = $("labPhaseMeta");
+    const ps = d.phaseStats || {};
+    const n = ps.n || 0;
+    meta.textContent = n === 0 ? "no reviewed games yet" : `${n} reviewed game${n === 1 ? "" : "s"}`;
+    if (!n) {
+      el.innerHTML = `<div class="lab-empty">Review some games to unlock phase analysis.</div>`;
+      return;
+    }
+    const row = (label, val, fillCls) => {
+      const v = val != null ? Math.round(val) : 0;
+      return `<div class="lab-phase-row"><span class="lab-phase-name">${label}</span>`
+        + `<span class="lab-phase-track"><span class="lab-phase-fill ${fillCls}" style="width:${v}%"></span></span>`
+        + `<span class="lab-phase-val">${v || 0}</span></div>`;
+    };
+    // navy-reference gradient lanes: green → amber → red (open → end)
+    el.innerHTML = row("Opening", ps.opening, "")
+      + row("Middlegame", ps.middlegame, "mid")
+      + row("Endgame", ps.endgame, "late");
+  }
+
   function paintLabWeaknesses(w) {
     const el = $("labWeaknessCards");
     const meta = $("labWeaknessMeta");
-    meta.textContent = `${w.reviewedGames || 0} reviewed game(s)`;
+    meta.textContent = `${w.reviewedGames || 0} reviewed game(s) · ${w.weaknesses.length} pattern${w.weaknesses.length === 1 ? "" : "s"} found`;
     if (!w.weaknesses.length) {
       el.innerHTML = `<div class="lab-empty">${labEscape(w.note || "Nothing to see yet — review more games or import them to surface patterns here.")}</div>`;
       return;
     }
     el.innerHTML = w.weaknesses.slice(0, 4).map((f) => `
       <div class="lab-weak">
+        <span class="lab-weak-stripe sev-${f.severity === 'high' ? 'high' : f.severity === 'medium' ? 'medium' : 'low'}"></span>
         <div>
           <div class="lab-weak-title">${labEscape(f.label)}</div>
           <div class="lab-weak-desc">${labEscape(f.description)}</div>
         </div>
-        <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-end; text-align:right">
-          <span class="lab-weak-chip ${f.severity === 'high' ? 'high' : f.severity === 'medium' ? 'medium' : 'low'}">${f.severity}</span>
-          <span class="lab-weak-count">${f.count}</span>
-          <span class="text-small text-muted">${f.confidence} confidence</span>
+        <div class="lab-weak-right">
+          <span class="lab-weak-count sev-${f.severity === 'high' ? 'high' : f.severity === 'medium' ? 'medium' : 'low'}">${f.count}</span>
+          <span class="lab-weak-conf">${f.confidence} conf.</span>
         </div>
       </div>`).join("");
   }
+
   function paintLabOpenings(o) {
     const el = $("labOpeningRows");
     const fams = o.families || [];
-    if (!fams.length) { el.innerHTML = `<div class="lab-empty">No games classified yet.</div>`; return; }
+    if (!fams.length) { el.innerHTML = `<div class="lab-empty">No games classified — import a PGN to populate this.</div>`; return; }
     el.innerHTML = fams.slice(0, 10).map((f) => {
       const decided = f.wins + f.losses + f.draws;
-      const bar = decided ? Math.round(100 * f.wins / decided) : 0;
       const wr = decided ? Math.round(100 * f.wins / decided) : null;
-      const cls = wr == null ? "mid" : wr >= 60 ? "" : wr >= 40 ? "mid" : "bad";
-      const confNote = f.confidence === "high" ? "" : ` · N=${f.games} (${f.confidence})`;
+      const wrCls = wr == null ? "" : wr >= 60 ? "ok" : wr >= 40 ? "mid" : "bad";
+      const confNote = f.confidence === "high" ? "" : ` · N=${f.games} ${f.confidence}`;
+      const wPct = f.games ? Math.round(100 * f.wins / f.games) : 0;
+      const dPct = f.games ? Math.round(100 * f.draws / f.games) : 0;
+      const lPct = f.games ? Math.max(0, 100 - wPct - dPct) : 0;
       return `<div class="lab-op">
         <span class="lab-op-eco">${labEscape(f.eco || "?")}</span>
         <span>
           <div class="lab-op-name">${labEscape(f.opening)}</div>
-          <div class="lab-op-meta"><span>${f.games} games · ${f.wins}W ${f.losses}L ${f.draws}D${confNote}</span></div>
-          <div class="lab-op-bar"><div class="lab-op-bar-fill ${cls}" style="width:${bar}%"></div></div>
+          <div class="lab-op-meta">${f.games} games · ${f.wins}W ${f.losses}L ${f.draws}D${confNote}</div>
+          <div class="lab-wd"><span class="lab-wd-w" style="width:${wPct}%"></span><span class="lab-wd-d" style="width:${dPct}%"></span><span class="lab-wd-l" style="width:${lPct}%"></span></div>
         </span>
-        <span class="lab-op-wr">${wr == null ? "—" : wr + "%"}</span>
+        <span class="lab-op-wr ${wrCls}">${wr == null ? "—" : wr + "%"}<small>WR</small></span>
       </div>`;
     }).join("");
   }
+
   function paintLabRecommendations(r) {
     const el = $("labRecList");
     const recs = r.recommendations || [];
@@ -2380,27 +2415,28 @@
       <div class="lab-rec prio-${rec.priority}">
         <span class="lab-rec-num">${i + 1}</span>
         <span>
-          <div class="lab-rec-title">${labEscape(rec.title)}<span class="lab-rec-tag">${rec.category}</span></div>
+          <div class="lab-rec-title">${labEscape(rec.title)}<span class="lab-rec-category">${rec.category}</span></div>
           <div class="lab-rec-body">${labEscape(rec.exerciseFocus)}</div>
           <div class="lab-rec-why">${labEscape(rec.why)}</div>
         </span>
       </div>`).join("");
   }
+
   function paintLabGames(list) {
     const el = $("labGameList");
-    $("labGameMeta").textContent = `${list.length} games`;
+    $("labGameMeta").textContent = `${list.length} shown (${list.length} total shown)`;
     if (!list.length) {
-      el.innerHTML = `<div class="lab-empty">No games imported yet. Use "Import PGN file" or "Paste PGN" above — games are deduplicated automatically.</div>`;
+      el.innerHTML = `<div class="lab-empty">No games imported yet. Use "Import file" or "Paste PGN" above — duplicates are skipped automatically.</div>`;
       return;
     }
     el.innerHTML = list.slice(0, 20).map((g) => {
       const cls = g.result === "1-0" ? "win" : g.result === "0-1" ? "loss" : "draw";
       const label = g.result === "1-0" ? "1-0" : g.result === "0-1" ? "0-1" : "½-½";
       return `<div class="lab-game">
+        <span class="lab-game-res ${cls}">${label}</span>
         <span><div class="lab-game-name">${labEscape(g.white)} vs ${labEscape(g.black)}</div>
           <div class="lab-game-meta">${labEscape(g.opening)} · ${labEscape(g.date || "?")} · ${labEscape(g.tcBucket)}</div></span>
-        <span class="lab-game-result ${cls}">${label}</span>
-        <button class="btn btn-xs lab-game-del" data-id="${g.id}" type="button" aria-label="Delete">✕</button>
+        <button class="lab-game-del" data-id="${g.id}" type="button" aria-label="Delete">&#10005;</button>
       </div>`;
     }).join("");
     el.querySelectorAll(".lab-game-del").forEach((b) => {
@@ -2410,6 +2446,7 @@
       };
     });
   }
+
   async function refreshLab() {
     try {
       const [d, w, o, r, g] = await Promise.all([
@@ -2417,12 +2454,12 @@
         api("/api/perf/openings"), api("/api/perf/recommendations"),
         api("/api/perf/games?limit=30"),
       ]);
-      paintLabHero(d); paintLabWeaknesses(w); paintLabOpenings(o);
+      paintLabHero(d); paintLabPhaseBars(d); paintLabWeaknesses(w); paintLabOpenings(o);
       paintLabRecommendations(r); paintLabGames(g.games || []);
     } catch (e) {
-      $("labHero").innerHTML = `<div class="lab-stat" style="grid-column:1/-1"><span>Lab unavailable — is the server awake?</span></div>`;
-      $("labWeaknessCards").innerHTML = ""; $("labOpeningRows").innerHTML = "";
-      $("labRecList").innerHTML = ""; $("labGameList").innerHTML = "";
+      $("labHero").innerHTML = `<div class="lab-hero-item" style="grid-column:1/-1"><div class="lab-hero-label">Lab unavailable — is the server awake?</div></div>`;
+      $("labPhaseBars").innerHTML = ""; $("labWeaknessCards").innerHTML = "";
+      $("labOpeningRows").innerHTML = ""; $("labRecList").innerHTML = ""; $("labGameList").innerHTML = "";
     }
   }
   async function perfSyncReviewed(res) {
