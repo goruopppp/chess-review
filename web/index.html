@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=58">
+<link rel="stylesheet" href="css/style.css?v=59">
 </head>
 <body>
 <div class="app-shell">
@@ -67,7 +67,7 @@
     <div id="exploreBanner" class="explore-banner" hidden>
       <span>Exploring from <b id="exploreFrom"></b> | <span id="exploreMoveInfo">engine evaluates as you play</span></span>
       <span class="explore-controls">
-        <select id="eloSelect" class="select" title="Engine level for Play vs engine" hidden>
+        <select id="eloSelect" class="select" title="Engine strength for Play vs engine">
           <option value="0" selected>Engine: full strength</option>
           <option value="1400">Engine: ~1400 Elo</option>
           <option value="1800">Engine: ~1800 Elo</option>
@@ -75,6 +75,10 @@
           <option value="2600">Engine: ~2600 Elo</option>
           <option value="2900">Engine: ~2900 Elo</option>
           <option value="3190">Engine: max (~3200)</option>
+        </select>
+        <select id="botSideSelect" class="select" title="Your color in a Play vs engine game - changing it starts a fresh game">
+          <option value="white" selected>You play: White</option>
+          <option value="black">You play: Black</option>
         </select>
         <button id="btnBotHint" class="btn btn-xs" type="button" title="The engine marks a good move for you - click again to hide" hidden>Hint</button>
         <button id="btnExitExplore" class="btn btn-xs" type="button">Exit explore</button>
@@ -508,6 +512,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=58"></script>
+<script src="js/app.js?v=59"></script>
 </body>
 </html>
