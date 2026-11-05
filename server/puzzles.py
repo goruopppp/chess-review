@@ -1,10 +1,10 @@
 """Fetch Lichess puzzles (lichess.org/training) for the in-app Puzzle tab.
 
 The public endpoint GET https://lichess.org/api/puzzle/next accepts an optional
-`theme` slug (mateIn1, mateIn2, fork, pin, endgame, ...) and returns a puzzle
-with rating / popularity / themes / solution / board FEN. No token required;
-outbound traffic is cached on disk briefly so the tab still opens when the
-network is flaky.
+`angle` query param (our `theme`, e.g. mateIn1, mateIn2, fork, pin, endgame...) —
+unlike a plain `theme`, which lichess silently ignores. Returns a puzzle with
+rating / popularity / themes / solution / board FEN. No token required; outbound
+traffic is cached on disk briefly so the tab still opens when the network is flaky.
 """
 import json
 import threading
@@ -86,7 +86,7 @@ def get_puzzle(theme=""):
                 return entry["puzzle"]
             stale = entry.get("puzzle")
     try:
-        r = requests.get(NEXT_URL, params=({"theme": theme} if theme else {}),
+        r = requests.get(NEXT_URL, params=({"angle": theme} if theme else {}),
                          headers=HEADERS, timeout=14)
         r.raise_for_status()
         puzzle = _normalize(r.json())
