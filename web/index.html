@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="en" data-ui-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game Review - Chess Review Studio</title>
+<link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
+<link rel="stylesheet" href="css/style.css?v=46">
+</head>
+<body>
+<div class="app-shell">
+  <nav class="sidebar" aria-label="Primary actions">
+    <div class="side-brand" aria-hidden="true">&#9822;</div>
+    <div class="side-actions">
+      <button id="btnNew" class="side-btn primary" type="button" title="New review" aria-label="New review">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg>
+      </button>
+      <button id="btnLibrary" class="side-btn" type="button" title="Game library - saved reviewed games" aria-label="Game library">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M5 3h4v18H5zM10 3h4v18h-4z" fill="currentColor" opacity=".55"/><path d="M15.5 4.2l3.8 1-4.7 17-3.8-1z" fill="currentColor"/></svg>
+      </button>
+      <button id="btnEditor" class="side-btn" type="button" title="Board editor - set up a custom position" aria-label="Board editor">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="btnLive" class="side-btn" type="button" aria-label="Toggle live engine analysis"></button>
+      <button id="btnFlip" class="side-btn" type="button" title="Flip board (F)" aria-label="Flip board">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4v15M8 19l-3.5-3.5M8 19l3.5-3.5M16 20V5M16 5l-3.5 3.5M16 5l3.5 3.5"/></g></svg>
+      </button>
+    </div>
+    <div class="side-bottom">
+      <button id="btnUiTheme" class="side-btn" type="button" title="Toggle light / dark" aria-label="Toggle light or dark theme"></button>
+      <button id="btnSettings" class="side-btn" type="button" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></g><circle cx="9" cy="7" r="2.2" fill="currentColor"/><circle cx="15" cy="12" r="2.2" fill="currentColor"/><circle cx="7" cy="17" r="2.2" fill="currentColor"/></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="main-area">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-knight" aria-hidden="true">&#9822;</span>
+        <span class="brand-name">Chess Review <b>Studio</b></span>
+      </div>
+      <nav class="topbar-actions">
+        <span class="engine-box" title="Analysis engine">
+          <label class="sr-only" for="engineSelect">Engine</label>
+          <select id="engineSelect" class="select"></select>
+        </span>
+        <span class="engine-box" title="Search depth preset">
+          <label class="sr-only" for="depthSelect">Depth</label>
+          <select id="depthSelect" class="select">
+            <option value="fast">Fast (d10)</option>
+            <option value="balanced" selected>Balanced (d12)</option>
+            <option value="deep">Deep (d14)</option>
+            <option value="max">Max (d16)</option>
+          </select>
+        </span>
+      </nav>
+      <div id="serverStatus" class="status-dot" title="Engine status"></div>
+    </header>
+
+<main class="layout">
+  <!-- ============ LEFT: board column ============ -->
+  <section class="board-col" aria-label="Chess board">
+    <div id="exploreBanner" class="explore-banner" hidden>
+      <span>Exploring from <b id="exploreFrom"></b> | <span id="exploreMoveInfo">engine evaluates as you play</span></span>
+      <span class="explore-controls">
+        <label class="chk"><input type="checkbox" id="chkPlayEngine"> vs engine</label>
+        <button id="btnExitExplore" class="btn btn-xs" type="button">Exit explore</button>
+      </span>
+    </div>
+    <div id="editorPanel" class="editor-panel" hidden>
+      <div class="ed-row">
+        <div class="ed-tray" id="edTray"></div>
+        <div class="ed-col">
+          <div class="ed-btns">
+            <button id="edStart" class="btn btn-xs" type="button">Start position</button>
+            <button id="edClear" class="btn btn-xs" type="button">Clear board</button>
+            <button id="edFlip" class="btn btn-xs" type="button">Flip</button>
+            <button id="edTurn" class="btn btn-xs" type="button">White to move</button>
+          </div>
+          <div class="ed-castling">
+            <label class="chk"><input type="checkbox" id="edCK">White O-O</label>
+            <label class="chk"><input type="checkbox" id="edCQ">White O-O-O</label>
+            <label class="chk"><input type="checkbox" id="edCk">Black O-O</label>
+            <label class="chk"><input type="checkbox" id="edCq">Black O-O-O</label>
+          </div>
+        </div>
+      </div>
+      <div class="ed-row">
+        <input type="text" id="edFen" class="input" placeholder="FEN" spellcheck="false">
+        <button id="edLoad" class="btn btn-xs" type="button">Load FEN</button>
+        <button id="edCopy" class="btn btn-xs" type="button">Copy FEN</button>
+      </div>
+      <div class="ed-row ed-actions">
+        <button id="edAnalyze" class="btn btn-primary btn-sm" type="button">Analyze this position</button>
+        <button id="edCancel" class="btn btn-xs" type="button">Done</button>
+        <span class="text-small text-muted">Pick a piece, then click squares to place it. Click a piece on the board to pick it up. Right-click deletes.</span>
+      </div>
+    </div>
+    <div id="quizPanel" class="editor-panel" hidden></div>
+    <div class="player-bar" id="playerTop">
+      <span class="avatar" id="avatarTop">B</span>
+      <span class="p-info"><span class="p-name" id="nameTop">Black</span> <span class="p-elo" id="eloTop"></span></span>
+      <span class="material" id="matTop"></span>
+      <span class="acc-badge" id="accTop" hidden></span>
+    </div>
+
+    <div class="board-wrap">
+      <div class="evalbar" id="evalBar" title="Evaluation">
+        <div class="evalbar-fill" id="evalBarFill"></div>
+        <span class="evalbar-num" id="evalBarNum">0.0</span>
+      </div>
+      <div class="board-outer">
+        <div id="board" class="board" role="img" aria-label="Chess board"></div>
+        <svg id="arrows" class="arrows" viewBox="0 0 8 8" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div id="promoOverlay" class="promo-overlay" hidden></div>
+        <div id="boardMsg" class="board-msg" hidden></div>
+      </div>
+    </div>
+
+    <div class="player-bar" id="playerBottom">
+      <span class="avatar" id="avatarBottom">W</span>
+      <span class="p-info"><span class="p-name" id="nameBottom">White</span> <span class="p-elo" id="eloBottom"></span></span>
+      <span class="material" id="matBottom"></span>
+      <span class="acc-badge" id="accBottom" hidden></span>
+    </div>
+
+    <div class="controls">
+      <button class="btn btn-icon" id="btnStart" title="Start (Home)" aria-label="Go to start">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><rect x="5" y="5" width="2.4" height="14" rx="1" fill="currentColor"/><path d="M19 6.2v11.6a1 1 0 0 1-1.6.8l-8-5.8a1 1 0 0 1 0-1.6l8-5.8a1 1 0 0 1 1.6.8z" fill="currentColor"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btnPrev" title="Previous move (Left arrow)" aria-label="Previous move">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M14.7 5.3a1 1 0 0 1 0 1.4L9.4 12l5.3 5.3a1 1 0 1 1-1.4 1.4l-6-6a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0z" fill="currentColor"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btnPlay" title="Autoplay (Space)" aria-label="Autoplay"></button>
+      <button class="btn btn-icon" id="btnNext" title="Next move (Right arrow)" aria-label="Next move">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M9.3 5.3a1 1 0 0 0 0 1.4l5.3 5.3-5.3 5.3a1 1 0 1 0 1.4 1.4l6-6a1 1 0 0 0 0-1.4l-6-6a1 1 0 0 0-1.4 0z" fill="currentColor"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btnEnd" title="End (End key)" aria-label="Go to end">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><rect x="16.6" y="5" width="2.4" height="14" rx="1" fill="currentColor"/><path d="M5 6.2v11.6a1 1 0 0 0 1.6.8l8-5.8a1 1 0 0 0 0-1.6l-8-5.8A1 1 0 0 0 5 6.2z" fill="currentColor"/></svg>
+      </button>
+      <span class="move-pill" id="curMovePill">&#8212;</span>
+    </div>
+  </section>
+
+  <!-- ============ RIGHT: game review panel ============ -->
+  <section class="review-col" aria-label="Game review panel">
+    <div class="panel-head">
+      <span class="ph-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M5 19h14v2H5zM12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4-4.8-2.5-4.8 2.5.9-5.4L4.2 7.7l5.4-.8z" fill="currentColor"/></svg>
+      </span>
+      <div class="ph-title">
+        <h2>Game Review</h2>
+        <div class="ph-sub" id="analysisMeta">Run a review to analyze this game</div>
+      </div>
+    </div>
+
+    <div id="accSummary" class="accsum">
+      <div class="accsum-empty">Load a game and run a review to see accuracies, classifications and key moments here.</div>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="Review views">
+      <button class="tab active" data-tab="report" role="tab" aria-selected="true" type="button">Game Report</button>
+      <button class="tab" data-tab="moves" role="tab" aria-selected="false" type="button">Moves</button>
+      <button class="tab" data-tab="engine" role="tab" aria-selected="false" type="button">Engine</button>
+      <button class="tab" data-tab="explorer" role="tab" aria-selected="false" type="button">Explorer</button>
+      <button class="tab" data-tab="repertoire" role="tab" aria-selected="false" type="button">Repertoire</button>
+    </div>
+
+    <div class="tab-body" id="tab-report" role="tabpanel">
+      <div id="reviewEmpty" class="empty-hint">
+        <p>Move-by-move analysis, coach comments, key moments and the full game report appear here.</p>
+        <button class="btn btn-primary" id="btnNew2" type="button">Start a review</button>
+      </div>
+      <div id="rcCard" hidden></div>
+      <div id="summaryBody"></div>
+      <h4 class="panel-sub" id="momentsHead" hidden>Key Moments</h4>
+      <div id="momentsList" class="moments"></div>
+      <h4 class="panel-sub" id="timeHead" hidden>Time Report</h4>
+      <div id="timeReport"></div>
+    </div>
+
+    <div class="tab-body" id="tab-moves" role="tabpanel" hidden>
+      <div class="movelist-wrap">
+        <div id="moveList" class="movelist"><div class="empty-hint small">Moves will appear here.</div></div>
+      </div>
+      <div class="graph-wrap">
+        <canvas id="graph" height="150" aria-label="Evaluation graph" role="img"></canvas>
+        <div id="graphTip" class="graph-tip" hidden></div>
+      </div>
+    </div>
+
+    <div class="tab-body" id="tab-engine" role="tabpanel" hidden>
+      <div class="topmoves">
+        <div class="topmoves-title"><span>Top engine moves</span><span id="topMovesMeta"></span></div>
+        <div id="topMovesBox" class="lines"></div>
+      </div>
+      <div class="engine-live-head">
+        <span id="liveEngineName" class="text-muted">&#8212;</span>
+        <span id="liveDepth" class="viz-badge"></span>
+      </div>
+      <div id="liveLines" class="lines"></div>
+      <p class="text-small text-muted" id="liveHint">Hover a line to see its arrow. Browse or play moves to explore.</p>
+    </div>
+
+    <div class="tab-body" id="tab-explorer" role="tabpanel" hidden>
+      <div class="exp-head">
+        <div class="exp-opening" id="explorerOpening">&#8212;</div>
+        <div class="exp-meta text-small text-muted" id="explorerMeta"></div>
+      </div>
+      <div id="explorerList" class="exp-list"></div>
+      <p class="text-small text-muted">Continuations from the Lichess masters database. Click a move to play it on the board.</p>
+    </div>
+
+    <div class="tab-body" id="tab-repertoire" role="tabpanel" hidden>
+      <div class="rep-saved">
+        <div class="rep-saved-head">
+          <b>Saved repertoires</b>
+          <span class="text-small text-muted">stored permanently · Train to practice, Open to view lines</span>
+        </div>
+        <div id="repSavedList" class="rep-saved-list"></div>
+      </div>
+      <div class="rep-controls">
+        <span class="opt"><label class="form-label" for="repSide">Side</label>
+          <select id="repSide" class="select"><option value="white">White</option><option value="black">Black</option></select></span>
+        <span class="opt"><label class="form-label" for="repMode">Style</label>
+          <select id="repMode" class="select">
+            <option value="mainline">Mainline (most played)</option>
+            <option value="strongest">Strongest (engine-checked)</option>
+            <option value="attacking">Attacking (sharp)</option>
+            <option value="solid">Solid (safe)</option>
+            <option value="creative">Creative (rare, risky)</option>
+          </select></span>
+        <span class="opt"><label class="form-label" for="repDepth">Your moves</label>
+          <select id="repDepth" class="select"><option>3</option><option selected>5</option><option>6</option><option>8</option></select></span>
+        <span class="opt"><label class="form-label" for="repBreadth">Opponent replies</label>
+          <select id="repBreadth" class="select"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></span>
+        <span class="opt"><label class="form-label" for="repRoot">Start from</label>
+          <select id="repRoot" class="select"><option value="start">Initial position</option><option value="current">Current board</option></select></span>
+      </div>
+      <div class="ed-btns" style="margin:10px 0">
+        <button id="repBuild" class="btn btn-primary btn-sm" type="button">Build repertoire</button>
+      </div>
+      <div id="repStatus" class="text-small text-muted" hidden></div>
+      <div id="repResults" hidden>
+        <div class="rep-summary" id="repSummary"></div>
+        <div class="ed-btns" style="margin:8px 0">
+          <button id="repCopyPgn" class="btn btn-sm" type="button">Copy PGN</button>
+          <button id="repDlPgn" class="btn btn-sm" type="button">Download PGN</button>
+        </div>
+        <div id="repLines" class="rep-lines"></div>
+        <p class="text-small text-muted">Click a line to copy it. PGN contains the full tree with variations and win-rate comments.</p>
+      </div>
+    </div>
+
+    <div class="panel-foot">
+      <button id="btnPgn" class="btn btn-sm" type="button" disabled>
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 0 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 0 1 1.4-1.4L11 13.6V4a1 1 0 0 1 1-1zM5 19a1 1 0 0 1 1-1h12a1 1 0 0 1 0 2H6a1 1 0 0 1-1-1z" fill="currentColor"/></svg>
+        Annotated PGN</button>
+      <button id="btnCopyPgn" class="btn btn-sm" type="button" disabled>Copy PGN</button>
+    </div>
+  </section>
+</main>
+  </div><!-- /main-area -->
+</div><!-- /app-shell -->
+
+<!-- ============ MODALS ============ -->
+<div id="modalNew" class="modal-backdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <h3 id="modalTitle">New Game Review</h3>
+      <button class="btn btn-icon" id="modalClose" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="tabs small" role="tablist">
+        <button class="tab active" data-src="paste" role="tab" aria-selected="true" type="button">Paste PGN</button>
+        <button class="tab" data-src="file" role="tab" aria-selected="false" type="button">File</button>
+        <button class="tab" data-src="lichess" role="tab" aria-selected="false" type="button">Lichess</button>
+        <button class="tab" data-src="chesscom" role="tab" aria-selected="false" type="button">Chess.com</button>
+        <button class="tab" data-src="sample" role="tab" aria-selected="false" type="button">Samples</button>
+      </div>
+
+      <div class="src-pane" id="src-paste">
+        <label class="form-label" for="pgnText">PGN</label>
+        <textarea id="pgnText" class="textarea" rows="8" placeholder="[Event ...]&#10;1. e4 e5 2. Nf3 ..."></textarea>
+      </div>
+      <div class="src-pane" id="src-file" hidden>
+        <label class="form-label" for="pgnFile">PGN file</label>
+        <input type="file" id="pgnFile" accept=".pgn,.txt" class="input">
+        <pre id="pgnFilePreview" class="file-preview text-small text-muted">No file chosen</pre>
+      </div>
+      <div class="src-pane" id="src-lichess" hidden>
+        <label class="form-label" for="lichessUser">Lichess username</label>
+        <input type="text" id="lichessUser" class="input" placeholder="e.g. DrNykterstein">
+        <button class="btn btn-sm" id="btnLichessFetch" type="button">Fetch latest games</button>
+        <div id="lichessGames" class="lichess-games"></div>
+      </div>
+      <div class="src-pane" id="src-chesscom" hidden>
+        <label class="form-label" for="chesscomUser">Chess.com username</label>
+        <input type="text" id="chesscomUser" class="input" placeholder="e.g. hikaru, GothamChess, MagnusCarlsen">
+        <div class="cc-row">
+          <span class="opt">
+            <label class="form-label" for="chesscomSpeed">Speed</label>
+            <select id="chesscomSpeed" class="select">
+              <option value="">Any speed</option>
+              <option value="bullet">Bullet</option>
+              <option value="blitz">Blitz</option>
+              <option value="rapid">Rapid</option>
+              <option value="daily">Daily</option>
+            </select>
+          </span>
+          <button class="btn btn-sm" id="btnChesscomFetch" type="button">Fetch recent games</button>
+        </div>
+        <div id="chesscomGames" class="lichess-games"></div>
+      </div>
+      <div class="src-pane" id="src-sample" hidden>
+        <div id="sampleList" class="sample-list"></div>
+      </div>
+
+      <div class="modal-options">
+        <span class="opt">
+          <label class="form-label" for="optEngine">Engine</label>
+          <select id="optEngine" class="select"></select>
+        </span>
+        <span class="opt">
+          <label class="form-label" for="optDepth">Strength</label>
+          <select id="optDepth" class="select">
+            <option value="fast">Fast</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="deep">Deep</option>
+            <option value="max">Max</option>
+          </select>
+        </span>
+        <span class="opt chk">
+          <input type="checkbox" id="optArrows" checked>
+          <label for="optArrows">Show best-move arrows</label>
+        </span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <div id="modalError" class="modal-error" role="alert" hidden></div>
+      <button class="btn btn-primary" id="btnStartReview" type="button">Start Review</button>
+    </div>
+    <div class="progress-pane" id="progressPane" hidden>
+      <div class="progress-stage" id="progressStage">Preparing...</div>
+      <div class="progress"><div class="progress-fill" id="progressFill"></div></div>
+      <div class="progress-note text-small text-muted" id="progressNote"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modalLibrary" class="modal-backdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="libTitle">
+    <div class="modal-head">
+      <h3 id="libTitle">Game Library</h3>
+      <div class="lib-head-actions">
+        <button class="btn btn-primary btn-sm" id="btnLibSave" type="button">Save current game</button>
+        <button class="btn btn-icon" id="libClose" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div id="libChart" class="lib-chart"></div>
+      <div id="libList" class="lib-list"></div>
+      <p class="text-small text-muted">Saved games reopen instantly with their full review - no re-analysis. Keeps the 8 most recent.</p>
+    </div>
+  </div>
+</div>
+
+<div id="modalSettings" class="modal-backdrop" hidden>
+  <div class="modal modal-apple" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+    <div class="apple-head">
+      <h2 id="setTitle">Settings</h2>
+      <button class="btn btn-icon apple-close" id="setClose" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg>
+      </button>
+    </div>
+    <div class="apple-body">
+      <div class="apple-group">
+        <div class="apple-group-title">Appearance</div>
+        <div class="apple-row">
+          <div class="apple-row-main"><span class="apple-label">Board size</span></div>
+          <div class="segmented" id="setBoardSize" role="group" aria-label="Board size">
+            <button type="button" data-value="small">S</button>
+            <button type="button" data-value="medium" class="active">M</button>
+            <button type="button" data-value="large">L</button>
+            <button type="button" data-value="xl">XL</button>
+          </div>
+        </div>
+        <div class="apple-row">
+          <div class="apple-row-main"><span class="apple-label">Board theme</span></div>
+          <div class="swatches" id="setBoardTheme" role="group" aria-label="Board theme">
+            <button type="button" data-value="green" class="active" title="Green"><span class="sw" style="--l:#ebecd0;--d:#739552"></span></button>
+            <button type="button" data-value="brown" title="Brown walnut"><span class="sw" style="--l:#f0d9b5;--d:#b58863"></span></button>
+            <button type="button" data-value="blue" title="Blue"><span class="sw" style="--l:#dee3e6;--d:#8ca2ad"></span></button>
+            <button type="button" data-value="gray" title="Gray"><span class="sw" style="--l:#e8e8e8;--d:#6f6f6f"></span></button>
+            <button type="button" data-value="purple" title="Purple"><span class="sw" style="--l:#e5ddfd;--d:#9f90b0"></span></button>
+            <button type="button" data-value="jade" title="Jade"><span class="sw" style="--l:#d7ece2;--d:#57a08a"></span></button>
+            <button type="button" data-value="night" title="Night"><span class="sw" style="--l:#8b8b8b;--d:#4a4a4a"></span></button>
+          </div>
+        </div>
+        <div class="apple-row">
+          <div class="apple-row-main"><span class="apple-label">Piece set</span></div>
+          <div class="piecesets" id="setPieceTheme" role="group" aria-label="Piece set">
+            <button type="button" data-value="classic" class="active" title="Classic"><img src="assets/pieces/wN.svg" alt="Classic"></button>
+            <button type="button" data-value="alpha" title="Alpha"><img src="assets/pieces-alpha/wN.svg" alt="Alpha"></button>
+            <button type="button" data-value="merida" title="Merida"><img src="assets/pieces-merida/wN.svg" alt="Merida"></button>
+            <button type="button" data-value="staunty" title="Staunton"><img src="assets/pieces-staunty/wN.svg" alt="Staunton"></button>
+          </div>
+        </div>
+        <div class="apple-row">
+          <div class="apple-row-main"><span class="apple-label">Animate piece moves</span><span class="apple-desc">Pieces glide when you navigate</span></div>
+          <label class="ioswitch"><input type="checkbox" id="setAnim" checked><span class="track"><span class="knob"></span></span></label>
+        </div>
+        <div class="apple-row">
+          <div class="apple-row-main"><span class="apple-label">Move sounds</span><span class="apple-desc">Synthesized move / capture / check / mate cues</span></div>
+          <label class="ioswitch"><input type="checkbox" id="setSound" checked><span class="track"><span class="knob"></span></span></label>
+        </div>
+        <div class="apple-row">
+          <div class="apple-row-main"><span class="apple-label">Keyboard shortcuts</span><span class="apple-desc">Arrows, F, Space, [ / ] for critical moments</span></div>
+          <button type="button" class="btn btn-sm" id="btnKeysLink">View</button>
+        </div>
+      </div>
+
+      <div class="apple-group">
+        <div class="apple-group-title">Engine</div>
+        <div class="apple-row">
+          <div class="apple-row-main"><span class="apple-label">Threads</span><span class="apple-desc">CPU cores per engine</span></div>
+          <div class="stepper" role="group" aria-label="Threads">
+            <button type="button" id="threadsMinus" aria-label="Fewer threads">−</button>
+            <input type="text" id="setThreads" value="1" inputmode="numeric" aria-live="polite">
+            <button type="button" id="threadsPlus" aria-label="More threads">+</button>
+          </div>
+        </div>
+        <div class="apple-row">
+          <div class="apple-row-main"><span class="apple-label">Memory (hash)</span><span class="apple-desc">RAM reserved per engine</span></div>
+          <select id="setHash" class="apple-select" aria-label="Hash size">
+            <option value="64">64 MB</option>
+            <option value="128" selected>128 MB</option>
+            <option value="256">256 MB</option>
+            <option value="512">512 MB</option>
+            <option value="1024">1 GB</option>
+          </select>
+        </div>
+        <div id="engineInfo" class="apple-info"></div>
+      </div>
+
+      <div class="apple-group">
+        <div class="apple-group-title">Lichess</div>
+        <div class="apple-row apple-col">
+          <span class="apple-label">API token</span>
+          <input type="password" id="setLichessToken" class="input apple-input" placeholder="Paste a free personal token" autocomplete="off">
+          <p class="apple-desc">Powers the opening explorer and book moves. Create one at lichess.org/account/oauth/token — stored only on this machine. <span id="tokenStatus"></span></p>
+        </div>
+      </div>
+    </div>
+    <div class="apple-foot">
+      <button class="btn btn-primary apple-done" id="setSave" type="button">Done</button>
+    </div>
+  </div>
+</div>
+
+<div id="modalKeys" class="modal-backdrop" hidden>
+  <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="keysTitle">
+    <div class="modal-head"><h3 id="keysTitle">Keyboard shortcuts</h3>
+      <button class="btn btn-icon" id="keysClose" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>
+      </button></div>
+    <div class="modal-body">
+      <div class="keys-grid">
+        <div class="key-row"><span class="kbd-set"><kbd>&larr;</kbd><kbd>&rarr;</kbd></span><span>Previous / next move</span></div>
+        <div class="key-row"><span class="kbd-set"><kbd>Home</kbd><kbd>End</kbd></span><span>Jump to start / final position</span></div>
+        <div class="key-row"><span class="kbd-set"><kbd>Space</kbd></span><span>Replay the game automatically</span></div>
+        <div class="key-row"><span class="kbd-set"><kbd>F</kbd></span><span>Flip the board</span></div>
+        <div class="key-row"><span class="kbd-set"><kbd>[</kbd><kbd>]</kbd></span><span>Previous / next critical moment</span></div>
+        <div class="key-row"><span class="kbd-set"><kbd>H</kbd></span><span>Hint during training (costs points)</span></div>
+        <div class="key-row"><span class="kbd-set"><kbd>Enter</kbd></span><span>Next question during training</span></div>
+        <div class="key-row"><span class="kbd-set"><kbd>?</kbd></span><span>Show this list</span></div>
+        <div class="key-row"><span class="kbd-set"><kbd>Esc</kbd></span><span>Close dialogs / stop line playback</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="js/board.js?v=45"></script>
+<script src="js/graph.js?v=45"></script>
+<script src="js/app.js?v=46"></script>
+</body>
+</html>
