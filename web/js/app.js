@@ -19,6 +19,7 @@
     playBot: false,        // sidebar "play vs engine" session (engine answers your moves)
     playBotColor: "white", // the color YOU play in a bot session
     hintUci: null,         // pending Hint arrow during a play session (uci)
+    puzzle: null,          // { data, fen, ply, wrong, lastMove, finished, solved, fail, sideToMove }
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const liveActive = () => state.liveOn && !state.liveSuspended && !editor.active && !state.quiz && !state.repTrain;
@@ -245,7 +246,7 @@
 
   function renderTopMoves() {
     const box = $("topMovesBox");
-    if (state.quiz || state.repTrain) {
+    if (state.quiz || state.repTrain || state.puzzle) {
       box.innerHTML = `<div class="empty-hint small" style="padding:14px">Hidden during training - no peeking!</div>`;
       $("topMovesMeta").textContent = "";
       return;
@@ -277,6 +278,7 @@
       if (state.explore.moves.length) return state.explore.moves[state.explore.moves.length - 1].fen;
       if (state.explore.baseFen) return state.explore.baseFen; // idle explore: analysis-ready position
     }
+    if (state.puzzle) return state.puzzle.fen;       // puzzle mode paints the board
     if (state.customFen && !state.review) return state.customFen;
     if (!state.review) return null;
     return state.review.positions[state.ply].fen;
@@ -293,6 +295,7 @@
   async function renderBoard() {
     const fen = currentFen();
     if (!fen) return;
+    if (state.puzzle) { puzzleRenderBoard(); return; }
     let lastUci = null, badge = null;
     if (state.explore && state.explore.moves.length) {
       const entry = state.explore.moves[state.explore.moves.length - 1];
@@ -641,6 +644,7 @@
   function goHome() {
     // leave anything that owns the board, using each mode's own exit routine
     if (state.playBot) stopPlayBot();
+    if (state.puzzle) puzzleQuit();
     if (state.quiz) quizQuit();
     if (state.repTrain) repTrainQuit();
     if (state.linePlay) stopLinePlay();
@@ -741,6 +745,7 @@
     const legalCount = board.legal.length;
     if (state.quiz) return quizGuess(chosen);
     if (state.repTrain) return repTrainGuess(chosen);
+    if (state.puzzle) return puzzleGuess(chosen);
     state.hintUci = null;      // moving consumes the Hint arrow
     // following the game line?
     if (state.review && (!state.explore || state.explore.moves.length === 0)) {
@@ -1465,6 +1470,7 @@
     document.querySelectorAll(".review-col .tab-body").forEach((b) => { b.hidden = b.id !== "tab-" + name; });
     if (name === "moves") setTimeout(() => graph.resize(), 0);
     if (name === "explorer") renderExplorer();
+    if (name === "puzzle" && !state.puzzle) pzNew();
   }
 
   /* ---------------- opening explorer ---------------- */
@@ -1967,6 +1973,165 @@
         <span class="mv"><span class="san">${moves[i + 1] ? moves[i + 1].san : ""}</span></span></div>`);
     }
     el.innerHTML = rows.join("");
+  }
+
+  /* ---------------- Lichess puzzles (v60) ---------------- */
+  let pzStats = { solved: 0, streak: 0, best: 0, rating: 1200 };
+  try {
+    const raw = localStorage.getItem("crs_puzzle_stats");
+    if (raw) pzStats = Object.assign(pzStats, JSON.parse(raw));
+  } catch (e) { /* private mode */ }
+  function pzSaveStats() {
+    try { localStorage.setItem("crs_puzzle_stats", JSON.stringify(pzStats)); } catch (e) { /* full */ }
+  }
+  const pzExpected = (my, their) => 1 / (1 + Math.pow(10, (their - my) / 400));
+
+  function paintPuzzleStats() {
+    $("pzStats").innerHTML =
+      `Solved <b>${pzStats.solved}</b> &middot; Streak <b class="${pzStats.streak > 0 ? "on" : ""}">${pzStats.streak}</b> &middot; Best <b>${pzStats.best}</b> &middot; Your rating <b>${Math.round(pzStats.rating)}</b>`;
+  }
+
+  function puzzleRenderBoard() {
+    const pz = state.puzzle;
+    if (!pz) return;
+    legalFor(pz.fen).then((l) => {
+      if (state.puzzle !== pz) return;               // user jumped to another puzzle meanwhile
+      board.setPosition(pz.fen, {
+        legal: l.moves, arrows: [], lastMove: pz.lastMove || "",
+        badge: pz._revealFrom ? { sq: pz._revealFrom, cls: "hint" } : null,
+        checkSq: l.check ? kingSquare(pz.fen) : null,
+      });
+    }).catch(() => {
+      board.setPosition(pz.fen, { legal: [], arrows: [], lastMove: pz.lastMove || "" });
+    });
+  }
+
+  function paintPzPanel() {
+    const pz = state.puzzle;
+    if (!pz) { paintPuzzleStats(); return; }
+    $("pzRating").textContent = "Rating " + (pz.data.rating || "?");
+    $("pzThemes").innerHTML = (pz.data.themes || []).slice(0, 3)
+      .map((t) => `<span class="pz-theme-chip">${String(t).replace(/[<>&]/g, "")}</span>`).join("");
+    const link = $("pzLink");
+    link.hidden = false;
+    link.href = pz.data.url || ("https://lichess.org/training/" + pz.data.id);
+    link.textContent = "lichess #" + pz.data.id;
+    const side = pz.fen.split(" ")[1] === "b" ? "Black" : "White";
+    $("pzTurn").innerHTML = pz.finished
+      ? (pz.solved ? "Solved!"
+                     : "Failed — press Retry to take another run at it.")
+      : `Find the best move for <b>${side}</b>${pz.wrong ? " · wrong move #" + pz.wrong : ""}`;
+    paintPuzzleStats();
+  }
+
+  function puzzleQuit() {
+    if (!state.puzzle) return;
+    state.puzzle = null;
+    state.liveSuspended = false;
+    $("pzSolved").hidden = true;
+    paintPuzzleStats();
+  }
+
+  async function pzNew() {
+    // leave every other board-mode cleanly; the puzzle owns the board now
+    if (state.quiz) quizQuit();
+    if (state.repTrain) repTrainQuit();
+    if (state.linePlay) stopLinePlay();
+    stopAutoplay();
+    if (editor.active) toggleEditor(false);
+    state.hintUci = null;
+    const theme = $("pzTheme").value;
+    try { localStorage.setItem("crs_puzzle_theme", theme); } catch (e) { /* private mode */ }
+    const btn = $("pzNew");
+    btn.disabled = true;
+    const label = btn.innerHTML;
+    btn.textContent = "Loading…";
+    try {
+      const data = await api("/api/puzzle?theme=" + encodeURIComponent(theme));
+      state.puzzle = {
+        data, fen: data.fen, ply: 0, wrong: 0, finished: false, solved: false,
+        lastMove: data.lastMove || "", _revealFrom: null,
+      };
+      state.liveSuspended = true;             // no spoilers from live analysis
+      const solver = data.fen.split(" ")[1] === "b" ? "black" : "white";
+      if (state.orientation !== solver) { board.flip(); state.orientation = board.orientation; }
+      $("pzSolved").hidden = true;
+      puzzleRenderBoard();
+      paintPzPanel();
+    } catch (e) {
+      state.puzzle = null;
+      $("pzTurn").innerHTML = "No puzzle loaded — lichess.org unreachable?";
+      toast("Could not fetch a puzzle");
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = label;
+    }
+  }
+
+  async function puzzleGuess(chosen) {
+    const pz = state.puzzle;
+    if (!pz || pz.finished) return;
+    if (chosen.uci === pz.data.solution[pz.ply]) {
+      const mv = await post("/api/move", { fen: pz.fen, uci: chosen.uci });
+      pz.fen = mv.fen; pz.ply++; pz.lastMove = chosen.uci;
+      playMoveSound(mv.san);
+      if (pz.ply < pz.data.solution.length) {   // forced opponent reply
+        await sleep(200);
+        const opp = pz.data.solution[pz.ply];
+        try {
+          const om = await post("/api/move", { fen: pz.fen, uci: opp });
+          pz.fen = om.fen; pz.ply++; pz.lastMove = opp;
+          playMoveSound(om.san);
+        } catch (e) { /* opponent reply failed - just stop */ }
+      }
+      if (pz.ply >= pz.data.solution.length) {
+        pz.finished = true; pz.solved = true;
+        const gain = Math.max(6, Math.round(24 * (1 - pzExpected(pzStats.rating, pz.data.rating || 1500))));
+        pzStats.rating = pzStats.rating + gain;
+        pzStats.solved++; pzStats.streak++; pzStats.best = Math.max(pzStats.best, pzStats.streak);
+        pzSaveStats();
+        $("pzSolved").hidden = false;
+        $("pzSolvedText").textContent = "Solved! +" + gain + " rating · streak " + pzStats.streak;
+        toast("Solved!", 2600);
+      }
+      puzzleRenderBoard();
+      paintPzPanel();
+      return;
+    }
+    // wrong move: single strike fails the puzzle, Lichess-style
+    pz.wrong++;
+    pzStats.streak = 0;
+    board.setPosition(pz.fen, { arrows: [], badge: { sq: chosen.uci.slice(2, 4), cls: "blunder" } });
+    pz.finished = true; pz.fail = true;
+    const loss = Math.max(6, Math.round(24 * pzExpected(pzStats.rating, pz.data.rating || 1500)));
+    pzStats.rating = Math.max(400, pzStats.rating - loss);
+    pzSaveStats();
+    pz._revealFrom = pz.data.solution[pz.ply].slice(0, 2);
+    puzzleRenderBoard();
+    $("pzSolved").hidden = false;
+    $("pzSolvedText").textContent = "Failed · −" + loss + " rating · streak reset";
+    toast("That's not it — Retry to try again");
+    paintPzPanel();
+  }
+
+  function pzRetry() {
+    const pz = state.puzzle;
+    if (!pz) return;
+    state.puzzle = {
+      data: pz.data, fen: pz.data.fen, ply: 0, wrong: 0, finished: false, solved: false,
+      lastMove: pz.data.lastMove || "", _revealFrom: null,
+    };
+    $("pzSolved").hidden = true;
+    puzzleRenderBoard();
+    paintPzPanel();
+  }
+
+  function pzHint() {
+    const pz = state.puzzle;
+    if (!pz || pz.finished) { toast("No hint needed here"); return; }
+    pz._revealFrom = pz.data.solution[pz.ply].slice(0, 2);
+    puzzleRenderBoard();
+    toast("Hint: move the highlighted piece", 2500);
   }
 
   /* ---------------- best-move trainer (find the best move) ---------------- */
@@ -2885,6 +3050,16 @@
   $("btnPrev").onclick = () => step(-1);
   $("btnNext").onclick = () => step(1);
   $("btnPlay").onclick = () => (state.playing ? stopAutoplay() : startAutoplay());
+  $("pzNew").onclick = () => pzNew();
+  $("pzNextBtn").onclick = () => pzNew();
+  $("pzSkipBtn").onclick = () => pzNew();
+  $("pzRetryBtn").onclick = pzRetry;
+  $("pzHintBtn").onclick = pzHint;
+  try {
+    const saved = localStorage.getItem("crs_puzzle_theme");
+    if (saved) $("pzTheme").value = saved;
+  } catch (e) { /* private mode */ }
+  paintPuzzleStats();
   $("btnExitExplore").onclick = () => { if (state.playBot) stopPlayBot(); exitExplore(); switchTab("report"); };
   $("btnPlayBot").onclick = () => {
     if (state.playBot) return stopPlayBot();
