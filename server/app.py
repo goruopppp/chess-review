@@ -191,9 +191,27 @@ def api_eval():
         return jsonify({"gameover": True})
     eff_depth = min(depth, 3) if engine.id == "builtin" else depth
     eff_mt = None if engine.id == "builtin" else movetime
+    # optional engine-strength limit for "vs engine" play (UCI standard options;
+    # the old server quietly ignores the unknown `elo` field, so the new client
+    # stays compatible with it - it just plays full strength there)
     try:
-        lines = engine.analyse(board.fen(), depth=eff_depth, multipv=multipv,
-                               timeout=180, movetime=eff_mt)
+        elo = int(data.get("elo") or 0)
+    except (TypeError, ValueError):
+        elo = 0
+    options = None
+    if engine.id != "builtin":
+        if elo:
+            elo = max(1320, min(3190, elo))
+            options = {"UCI_LimitStrength": "true", "UCI_Elo": str(elo)}
+        else:
+            options = {"UCI_LimitStrength": "false"}   # un-limit after a limited game
+    try:
+        if options:
+            lines = engine.analyse(board.fen(), depth=eff_depth, multipv=multipv,
+                                   timeout=180, movetime=eff_mt, options=options)
+        else:
+            lines = engine.analyse(board.fen(), depth=eff_depth, multipv=multipv,
+                                   timeout=180, movetime=eff_mt)
     except Exception as e:
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
     white_to_move = board.turn == chess.WHITE
