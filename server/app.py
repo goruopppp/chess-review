@@ -449,6 +449,31 @@ def api_move():
     })
 
 
+@app.post("/api/move/chain")
+def api_move_chain():
+    """Apply several moves at once, returning every intermediate FEN (repertoire preview)."""
+    import chess
+    data = request.get_json(force=True, silent=True) or {}
+    ucis = data.get("ucis")
+    if not isinstance(ucis, list) or not ucis or len(ucis) > 40:
+        return jsonify({"error": "ucis must be a list of 1..40 moves"}), 400
+    try:
+        board = chess.Board(data.get("fen") or "")
+    except Exception:
+        return jsonify({"error": "invalid input"}), 400
+    fens = [board.fen()]
+    try:
+        for uci in ucis:
+            mv = chess.Move.from_uci(uci or "")
+            if mv not in board.legal_moves:
+                raise ValueError("illegal move")
+            board.push(mv)
+            fens.append(board.fen())
+    except Exception:
+        return jsonify({"error": "invalid input"}), 400
+    return jsonify({"fens": fens})
+
+
 @app.get("/api/legal")
 def api_legal():
     """Legal moves (uci + san) for a FEN — used by the board UI for click-to-move."""
