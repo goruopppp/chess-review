@@ -20,9 +20,10 @@
     playBotColor: "white", // the color YOU play in a bot session
     hintUci: null,         // pending Hint arrow during a play session (uci)
     puzzle: null,          // { data, fen, ply, wrong, lastMove, finished, solved, fail, sideToMove }
+    trainerEx: null,       // current training card during a trainer session
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const liveActive = () => state.liveOn && !state.liveSuspended && !editor.active && !state.quiz && !state.repTrain;
+  const liveActive = () => state.liveOn && !state.liveSuspended && !editor.active && !state.quiz && !state.repTrain && !state.puzzle && !state.trainerEx;
   const DEPTHS = {
     fast: { depth: 10, movetime: 500 },
     balanced: { depth: 12, movetime: 1000 },
@@ -246,7 +247,7 @@
 
   function renderTopMoves() {
     const box = $("topMovesBox");
-    if (state.quiz || state.repTrain || state.puzzle) {
+    if (state.quiz || state.repTrain || state.puzzle || state.trainerEx) {
       box.innerHTML = `<div class="empty-hint small" style="padding:14px">Hidden during training - no peeking!</div>`;
       $("topMovesMeta").textContent = "";
       return;
@@ -279,6 +280,7 @@
       if (state.explore.baseFen) return state.explore.baseFen; // idle explore: analysis-ready position
     }
     if (state.puzzle) return state.puzzle.fen;       // puzzle mode paints the board
+    if (state.trainerEx) return state.trainerEx.fen; // trainer mode paints the board
     if (state.customFen && !state.review) return state.customFen;
     if (!state.review) return null;
     return state.review.positions[state.ply].fen;
@@ -296,6 +298,7 @@
     const fen = currentFen();
     if (!fen) return;
     if (state.puzzle) { puzzleRenderBoard(); return; }
+    if (state.trainerEx) { trainerRenderBoard(); return; }
     let lastUci = null, badge = null;
     if (state.explore && state.explore.moves.length) {
       const entry = state.explore.moves[state.explore.moves.length - 1];
@@ -408,6 +411,7 @@
   }
 
   function step(d) {
+    if (state.trainerEx) return;      // arrow keys don't navigate a training card
     stopAutoplay();
     const ex = state.explore;                    // analysis mode: arrows walk the
     if (ex) {                                    // explored moves back and forward
@@ -645,6 +649,7 @@
     // leave anything that owns the board, using each mode's own exit routine
     if (state.playBot) stopPlayBot();
     if (state.puzzle) puzzleQuit();
+    if (state.trainerEx) trainerQuit();
     if (state.quiz) quizQuit();
     if (state.repTrain) repTrainQuit();
     if (state.linePlay) stopLinePlay();
@@ -745,6 +750,7 @@
     const legalCount = board.legal.length;
     if (state.quiz) return quizGuess(chosen);
     if (state.repTrain) return repTrainGuess(chosen);
+    if (state.trainerEx) return trainerGuess(chosen);
     if (state.puzzle) return puzzleGuess(chosen);
     state.hintUci = null;      // moving consumes the Hint arrow
     // following the game line?
@@ -1356,6 +1362,7 @@
       toast("Previous session restored", 3000);
     } else {
       saveSession(res);
+      syncTrainerFromReview(res);   // fresh review → new trainer exercises (deduped)
       toast(`Review complete � White ${res.players.white.accuracy}% vs Black ${res.players.black.accuracy}%`, 4000);
     }
   }
@@ -1475,6 +1482,7 @@
     if (name === "moves") setTimeout(() => graph.resize(), 0);
     if (name === "explorer") renderExplorer();
     if (name === "puzzle" && !state.puzzle) pzNew();
+    if (name === "trainer") refreshTrainer();
   }
 
   /* ---------------- opening explorer ---------------- */
@@ -1979,6 +1987,329 @@
     el.innerHTML = rows.join("");
   }
 
+  /* ---------------- Mistake Trainer (v63) ---------------- */
+  const trainerUI = { queue: [], idx: 0, results: [], cardAt: 0, revealFrom: null };
+
+  const trainerEsc = (s) => String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const trainerEval = (cp) => {
+    if (cp == null || Number.isNaN(cp)) return "?";
+    const v = cp / 100;
+    return (v >= 0 ? "+" : "") + v.toFixed(2);
+  };
+  const trainerFmtDue = (e) => {
+    if (e.status === "new") return ["New", "tr-badge-new"];
+    if (e.status === "mastered") return ["Mastered", "tr-badge-ok"];
+    const now = Date.now() / 1000;
+    if (e.dueAt <= now) return ["Due now", "tr-badge-due"];
+    return ["in " + Math.ceil((e.dueAt - now) / 86400) + "d", "tr-badge-due"];
+  };
+
+  function trainerFilters() {
+    const out = {};
+    const cls = $("trFilterCls").value; if (cls) out.cls = cls;
+    const side = $("trFilterSide").value; if (side) out.side = side;
+    const st = $("trFilterStatus").value; if (st) out.status = st;
+    const src = $("trFilterSource").value; if (src) out.source = src;
+    return out;
+  }
+  function trainerQs(f, extra) {
+    const p = new URLSearchParams(f);
+    if (extra) Object.keys(extra).forEach((k) => p.set(k, extra[k]));
+    const s = p.toString();
+    return s ? "?" + s : "";
+  }
+  function trainerShowView(v) {
+    $("trainerDash").hidden = v !== "dash";
+    $("trainerSession").hidden = v !== "session";
+    $("trainerDone").hidden = v !== "done";
+  }
+
+  async function syncTrainerFromReview(res) {
+    try {
+      const r = await post("/api/trainer/extract", { review: res });
+      if (r && r.created > 0) toast(`+${r.created} training exercise${r.created > 1 ? "s" : ""} saved`, 3500);
+    } catch (e) { /* trainer is best effort - never break a review */ }
+  }
+  async function trainerSyncAuto() {
+    // one-shot migration for games already in the local library (idempotent)
+    let added = 0;
+    try {
+      for (const g of libLoad()) {
+        try {
+          const r = await post("/api/trainer/extract", { review: g.review });
+          if (r && r.created) added += r.created;
+        } catch (e) { /* skip that game */ }
+      }
+    } catch (e) { /* best effort */ }
+    if (added > 0) toast(`Trainer synced: +${added} new exercise${added > 1 ? "s" : ""} from your saved games`, 4000);
+    return added;
+  }
+
+  function paintTrainerStats(d) {
+    const cell = (v, label, cls) =>
+      `<div class="tr-stat ${cls || ""}"><b>${v}</b><span>${label}</span></div>`;
+    $("trHeroStats").innerHTML =
+      cell(d.due ?? 0, "due now", "hot") +
+      cell(d.new ?? 0, "new", "ok") +
+      cell(d.total ?? 0, "total", "") +
+      cell(d.mastered ?? 0, "mastered", "ok") +
+      cell(d.accuracy != null ? d.accuracy + "%" : "—", "accuracy", "") +
+      cell(d.recentAccuracy != null ? d.recentAccuracy + "%" : "—", "last 50", "") +
+      cell(`${d.streakDays || 0}d`, "streak", (d.streakDays || 0) > 0 ? "hot" : "") +
+      cell(`${Math.round((d.studyTimeMs || 0) / 60000)}m`, "studied", "");
+    // weakest category, only when reliable
+    const w = (d.weakCategories || [])[0];
+    const names = { blunder: "blunders", miss: "missed wins", mistake: "mistakes" };
+    if (w) {
+      $("trWeakCard").hidden = false;
+      $("trWeakCard").innerHTML = `Weakest area so far: <b>${names[w.cls] || w.cls}</b> — ${w.misses} missed ${w.misses === 1 ? "attempt" : "attempts"} logged.`;
+    } else {
+      $("trWeakCard").hidden = true;
+    }
+  }
+  function paintTrainerList(list) {
+    const el = $("trList");
+    if (!list.length) {
+      $("trListMeta").textContent = "0";
+      el.innerHTML = `<div class="empty-hint small">No exercises match. Sync a fresh review or loosen the filters.</div>`;
+      return;
+    }
+    $("trListMeta").textContent = list.length + (list.length >= 50 ? "+" : "") + " shown";
+    el.innerHTML = list.map((e) => {
+      const [tagTxt, tagCls] = trainerFmtDue(e);
+      const mv = `${e.moveNumber || "?"}${e.colorSide === "black" ? "..." : "."} ${e.bestSan}`;
+      return `<div class="tr-row"><span class="tr-chip ${e.cls}">${trainerEsc(e.cls)}</span>
+        <span><b class="mv">${trainerEsc(mv)}</b>
+          <div class="meta">${trainerEsc(e.sourceName)} · ${trainerEsc(e.opening || "opening")} · missed ${trainerEsc(e.playedSan)}</div></span>
+        <span class="${tagCls}">${tagTxt}</span></div>`;
+    }).join("");
+  }
+  function paintTrainerHistory(list) {
+    const el = $("trHistory");
+    if (!list.length) {
+      el.innerHTML = `<div class="empty-hint small">No attempts yet — start your first session!</div>`;
+      return;
+    }
+    const now = new Date(); const y1 = new Date(); y1.setDate(y1.getDate() - 1);
+    el.innerHTML = list.map((h) => {
+      const d = new Date((h.attemptedAt || 0) * 1000);
+      const when = d.toDateString() === now.toDateString() ? "today"
+        : d.toDateString() === y1.toDateString() ? "yesterday"
+        : Math.floor((Date.now() - d) / 86400000) + "d ago";
+      return `<div class="tr-hist"><span class="dot ${h.solved ? "ok" : "bad"}"></span>
+        <span>${trainerEsc(h.label || h.cls)} · played <b>${trainerEsc(h.playedSan || "?")}</b> / best <b>${trainerEsc(h.bestSan)}</b></span>
+        <span class="when">${when}</span></div>`;
+    }).join("");
+  }
+  function populateTrainerSources(list) {
+    const sel = $("trFilterSource");
+    const prev = sel.value;
+    sel.innerHTML = `<option value="">All games</option>` +
+      list.map((s) => `<option value="${trainerEsc(s.id)}">${trainerEsc(s.name)} · ${s.count}</option>`).join("");
+    if (prev && list.some((s) => s.id === prev)) sel.value = prev;
+  }
+  function refreshTrainer() {
+    if (state.trainerEx) { trainerShowView("session"); return Promise.resolve(); }
+    return (async () => {
+      try {
+        const f = trainerFilters();
+        const d = await api("/api/trainer/dashboard" + trainerQs(f));
+        paintTrainerStats(d);
+        const l = await api("/api/trainer/list" + trainerQs(f, { limit: 50 }));
+        paintTrainerList((l && l.exercises) || []);
+        const h = await api("/api/trainer/history?limit=8");
+        paintTrainerHistory((h && h.history) || []);
+        const s = await api("/api/trainer/sources");
+        populateTrainerSources((s && s.sources) || []);
+      } catch (e) {
+        $("trHeroStats").innerHTML = `<div class="empty-hint small" style="grid-column:1/-1">Trainer unavailable — is the server awake?</div>`;
+        $("trList").innerHTML = ""; $("trHistory").innerHTML = "";
+      }
+    })();
+  }
+
+  async function startTrainerSession() {
+    if (state.quiz) quizQuit();
+    if (state.repTrain) repTrainQuit();
+    if (state.linePlay) stopLinePlay();
+    if (state.puzzle) puzzleQuit();
+    if (state.explore) exitExplore(false);
+    if (state.trainerEx) trainerQuit();
+    stopAutoplay();
+    if (editor.active) toggleEditor(false);
+    if (state.playBot) stopPlayBot();
+    const f = trainerFilters();
+    let queue = [];
+    try {
+      const r = await api("/api/trainer/queue" + trainerQs(f, { limit: 10 }));
+      queue = (r && r.queue) || [];
+    } catch (e) { /* handled below */ }
+    if (!queue.length) {
+      toast("Nothing due — you're caught up! Sync a fresh review, or loosen the filters.", 4500);
+      return;
+    }
+    trainerUI.queue = queue; trainerUI.idx = 0; trainerUI.results = [];
+    loadTrainerCard(0);
+    trainerShowView("session");
+  }
+  function loadTrainerCard(i) {
+    trainerUI.idx = i;
+    trainerUI.revealFrom = null;
+    const ex = trainerUI.queue[i];
+    state.trainerEx = JSON.parse(JSON.stringify(ex));
+    state.trainerEx.attempt = null;
+    trainerUI.cardAt = Date.now();
+    if (state.orientation !== ex.turn) { board.flip(); state.orientation = board.orientation; }
+    const n = trainerUI.queue.length;
+    $("trSessCount").textContent = (i + 1) + " / " + n;
+    $("trProgressFill").style.width = (100 * i) / n + "%";
+    $("trTurn").innerHTML = `<b>${ex.turn === "w" ? "White" : "Black"}</b> to move — find the best move!`;
+    $("trMeta").innerHTML =
+      `<span class="tag">${trainerEsc(ex.label || ex.cls)}</span>` +
+      (ex.opening ? `<span class="tag">${trainerEsc(ex.opening)}</span>` : "") +
+      `<span>from <b>${trainerEsc(ex.sourceName)}</b></span><span>move ${ex.moveNumber || "?"}</span>`;
+    $("trFeedback").hidden = true;
+    $("trRevealBtn").disabled = false;
+    trainerRenderBoard();
+  }
+  async function trainerRenderBoard() {
+    const ex = state.trainerEx;
+    if (!ex) return;
+    const legal = await legalFor(ex.fen).catch(() => ({ moves: [] }));
+    if (state.trainerEx !== ex) return;
+    board.setPosition(ex.fen, {
+      legal: legal.moves, arrows: [], lastMove: "",
+      badge: trainerUI.revealFrom ? { sq: trainerUI.revealFrom, cls: "hint" } : null,
+      checkSq: legal && legal.check ? kingSquare(ex.fen) : null,
+    });
+  }
+  async function trainerGuess(chosen) {
+    const ex = state.trainerEx;
+    if (!ex || ex.attempt) return;
+    const mv = await post("/api/move", { fen: ex.fen, uci: chosen.uci });
+    if (!mv) { toast("Illegal move"); return; }
+    playMoveSound(mv.san);
+    const lines = ex.lines || [];
+    const best = lines[0] || { uci: ex.bestUci, san: ex.bestSan, cp: null };
+    const match = lines.find((l) => l.uci === chosen.uci) || null;
+    let verdict, quality, gapCp = 0;
+    if (chosen.uci === ex.bestUci) {
+      verdict = "best"; quality = 5;
+    } else if (match) {
+      if (best.mate != null && match.mate != null) {
+        const d = Math.abs(Math.abs(best.mate) - Math.abs(match.mate));
+        verdict = d <= 1 ? "good-enough" : "slightly-off";
+        quality = d <= 1 ? 4 : 2;
+      } else {
+        gapCp = Math.max(0, (best.cp || 0) - (match.cp || 0));
+        verdict = gapCp <= 20 ? "good-enough" : gapCp <= 80 ? "slightly-off" : "bad";
+        quality = verdict === "good-enough" ? 4 : verdict === "slightly-off" ? 2 : 0;
+      }
+    } else { verdict = "bad"; quality = 0; }
+    ex.attempt = { playedUci: chosen.uci, san: mv.san, verdict, quality, gapCp };
+    const badgeCls = verdict === "best" ? "best" : verdict === "good-enough" ? "excellent"
+      : verdict === "slightly-off" ? "inaccuracy" : "blunder";
+    board.setPosition(ex.fen, {
+      legal: [], lastMove: chosen.uci,
+      arrows: verdict === "best" ? []
+        : [{ uci: ex.bestUci, color: "rgba(255,168,46,.92)", width: 0.22, opacity: 0.95 }],
+      badge: { sq: chosen.uci.slice(2, 4), cls: badgeCls },
+      checkSq: null,
+    });
+    paintTrainerVerdict(ex, verdict, gapCp);
+  }
+  function paintTrainerVerdict(ex, verdict, gapCp) {
+    const v = $("trVerdict"), b = $("trFeedbackBody");
+    const head = { best: "✓ Exactly right!", "good-enough": "That works too!", "slightly-off": "Playable — but…", bad: "That's not it" };
+    const cls = { best: "good", "good-enough": "mixed", "slightly-off": "mixed", bad: "bad" };
+    v.textContent = head[verdict] || head.bad;
+    v.className = "tr-verdict " + (cls[verdict] || "bad");
+    let body = "";
+    if (verdict === "best") {
+      body = `<b>${trainerEsc(ex.attempt.san)}</b> is the engine's top choice — engine and you agree.`;
+    } else if (verdict === "good-enough") {
+      body = `<b>${trainerEsc(ex.attempt.san)}</b> keeps things level — the engine's top choice is <b>${trainerEsc(ex.bestSan)}</b>${gapCp ? ` (≈ ${gapCp}cp better)` : ""}.`;
+    } else if (verdict === "slightly-off") {
+      body = `<b>${trainerEsc(ex.attempt.san)}</b> is playable — but <b>${trainerEsc(ex.bestSan)}</b> is clearly stronger (≈ ${gapCp}cp).`;
+    } else {
+      body = `<b>${trainerEsc(ex.attempt.san)}</b> isn't good — <b>${trainerEsc(ex.bestSan)}</b> was needed here.`;
+    }
+    body += `<div class="swing" style="margin-top:4px">eval ${trainerEval(ex.cpBefore)} → ${trainerEval(ex.cpAfter)} · win ${ex.winBefore ?? "?"}% → ${ex.winAfter ?? "?"}%</div>`;
+    if (verdict !== "best" && ex.pvSan && ex.pvSan.length) {
+      body += `<div class="swing" style="margin-top:4px">Engine line: ${ex.pvSan.map(trainerEsc).join(" ")}</div>`;
+    }
+    b.innerHTML = body;
+    ["trAgain", "trHard", "trGood", "trEasy"].forEach((id) => $(id).classList.remove("suggested"));
+    const map = { 0: "trAgain", 2: "trHard", 4: "trGood", 5: "trEasy" };
+    const pick = (ex.attempt.quality in map) ? map[ex.attempt.quality] : "trGood";
+    $(pick).classList.add("suggested");
+    ["trAgain", "trHard", "trGood", "trEasy"].forEach((id) => { $(id).disabled = false; });
+    $("trFeedback").hidden = false;
+    $("trHintBtn").hidden = false;
+    $("trRevealBtn").disabled = true;
+  }
+  async function trainerGrade(quality) {
+    const ex = state.trainerEx;
+    if (!ex || !ex.attempt) return;
+    ["trAgain", "trHard", "trGood", "trEasy"].forEach((id) => { $(id).disabled = true; });
+    const ms = Date.now() - (trainerUI.cardAt || Date.now());
+    try {
+      const r = await post("/api/trainer/result", {
+        exerciseId: ex.id, quality, playedUci: ex.attempt.playedUci, ms,
+      });
+      const days = r && (r.intervalDays != null) ? Math.round(r.intervalDays) : 1;
+      toast(`Saved · next review in ~${days}d`, 2400);
+      trainerUI.results.push({ cls: ex.cls, quality });
+    } catch (e) {
+      toast("Couldn't save that attempt — check the server", 3000);
+    }
+    const n = trainerUI.idx + 1;
+    if (n >= trainerUI.queue.length) finishTrainerSession();
+    else loadTrainerCard(n);
+  }
+  function advanceTrainerCard() {
+    if (!state.trainerEx) return;
+    const n = trainerUI.idx + 1;
+    if (n >= trainerUI.queue.length) finishTrainerSession();
+    else loadTrainerCard(n);
+  }
+  function finishTrainerSession() {
+    state.trainerEx = null;
+    const solved = trainerUI.results.filter((r) => r.quality > 0).length;
+    const total = trainerUI.results.length;
+    $("trDoneStats").innerHTML =
+      `<div class="tr-done-stat"><b>${solved}</b><span>solved</span></div>
+       <div class="tr-done-stat"><b>${total - solved}</b><span>missed</span></div>
+       <div class="tr-done-stat"><b>${total ? Math.round(100 * solved / total) : 0}%</b><span>accuracy</span></div>`;
+    trainerShowView("done");
+  }
+  function trainerQuit() {
+    state.trainerEx = null; trainerUI.queue = []; trainerUI.idx = 0; trainerUI.results = [];
+    trainerShowView("dash");
+    renderBoard();
+    refreshTrainer();
+  }
+  function trainerHint() {
+    const ex = state.trainerEx;
+    if (!ex || ex.attempt) return;
+    trainerUI.revealFrom = ex.bestUci.slice(0, 2);
+    trainerRenderBoard();
+    toast("Hint: look at the piece on " + trainerUI.revealFrom, 3000);
+  }
+  function trainerReveal() {
+    const ex = state.trainerEx;
+    if (!ex) return;
+    trainerUI.revealFrom = ex.bestUci.slice(0, 2);
+    board.setPosition(ex.fen, {
+      legal: [], lastMove: "",
+      arrows: [{ uci: ex.bestUci, color: "rgba(255,168,46,.95)", width: 0.24, opacity: 0.97 }],
+      badge: { sq: ex.bestUci.slice(0, 2), cls: "hint" },
+      checkSq: null,
+    });
+    toast("Solution: " + ex.bestSan, 3500);
+  }
+
   /* ---------------- Lichess puzzles (v60) ---------------- */
   let pzStats = { solved: 0, streak: 0, best: 0, rating: 1200 };
   try {
@@ -2477,7 +2808,10 @@
         toast(`Opened: ${libGameName(g)}`, 2500);
       };
       row.querySelector(".lib-del").onclick = () => {
-        libSave(libLoad().filter((x) => x.id !== row.dataset.id));
+        const id = row.dataset.id;
+        libSave(libLoad().filter((x) => x.id !== id));
+        // drop trainer exercises that were sourced exclusively from this game
+        post("/api/trainer/detach", { sourceId: id }).catch(() => {});
         renderLibrary();
       };
     });
@@ -3066,6 +3400,33 @@
   $("pzSkipBtn").onclick = () => pzNew();
   $("pzRetryBtn").onclick = pzRetry;
   $("pzHintBtn").onclick = pzHint;
+  $("btnTrainerStart").onclick = startTrainerSession;
+  $("btnTrainerQuit").onclick = trainerQuit;
+  $("btnTrainerSkip").onclick = advanceTrainerCard;
+  $("trHintBtn").onclick = trainerHint;
+  $("trRevealBtn").onclick = trainerReveal;
+  $("trAgain").onclick = () => trainerGrade(0);
+  $("trHard").onclick = () => trainerGrade(2);
+  $("trGood").onclick = () => trainerGrade(4);
+  $("trEasy").onclick = () => trainerGrade(5);
+  $("btnTrainerDoneBack").onclick = trainerQuit;
+  $("btnTrainerSync").onclick = async () => {
+    $("btnTrainerSync").disabled = true;
+    const n = await trainerSyncAuto();
+    $("btnTrainerSync").disabled = false;
+    refreshTrainer();
+    if (!n) toast("Already in sync — nothing new to add", 2500);
+  };
+  [$("trFilterCls"), $("trFilterSide"), $("trFilterStatus"), $("trFilterSource")].forEach((el) => {
+    el.addEventListener("change", refreshTrainer);
+  });
+  // one-time migration: re-wrap the existing local library into the trainer DB
+  try {
+    if (!localStorage.getItem("crs_train_synced_63")) {
+      localStorage.setItem("crs_train_synced_63", "1");
+      trainerSyncAuto().then(refreshTrainer);
+    }
+  } catch (e) { /* private mode */ }
   try {
     const saved = localStorage.getItem("crs_puzzle_theme");
     if (saved) $("pzTheme").value = saved;
