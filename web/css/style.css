@@ -1006,3 +1006,7 @@ body { -webkit-tap-highlight-color: transparent; }
 @media (max-width: 640px) {
   .opening-chip { display: none; }
 }
+
+/* ---------- "play vs engine" active state on the sidebar button (v57) ---------- */
+.side-btn.bot-on { background: var(--accent); color: #fff; }
+.side-btn.bot-on:hover { background: var(--accent-hover); color: #fff; }
