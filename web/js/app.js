@@ -1,4 +1,4 @@
-/* Chess Review Studio — main application logic. */
+/* Chess Review Studio ï¿½ main application logic. */
 (function () {
   "use strict";
 
@@ -914,9 +914,9 @@
     const ex = state.explore;
     if (!ex || !ex.moves.length) { el.textContent = "engine evaluates as you play"; return; }
     const entry = ex.moves[ex.moves.length - 1];
-    if (!entry.cls) { el.textContent = `${entry.san} — evaluating…`; return; }
+    if (!entry.cls) { el.textContent = `${entry.san} ï¿½ evaluatingï¿½`; return; }
     const label = EXPLORE_LABELS[entry.cls] || entry.cls;
-    const acc = entry.accuracy != null ? ` · ${entry.accuracy.toFixed(0)}%` : "";
+    const acc = entry.accuracy != null ? ` ï¿½ ${entry.accuracy.toFixed(0)}%` : "";
     el.innerHTML = `last: <b>${entry.san}</b> ${smallChip(entry.cls)} ${label}${acc}`;
   }
 
@@ -966,7 +966,7 @@
       const engine = $("engineSelect").value || "stockfish";
       try {
         const res = await post("/api/eval", { fen, engine, depth: 20, movetime, multipv: 3 });
-        if (!liveActive() || currentFen() !== fen) continue; // stale — drop it
+        if (!liveActive() || currentFen() !== fen) continue; // stale ï¿½ drop it
         if (res.lines && res.lines.length) {
           state.live = { fen, lines: res.lines, engine: res.engine, depth: res.lines[0].depth, cycle: cycle + 1 };
           if (state.explore) {
@@ -1006,8 +1006,8 @@
     if (!st || !st.searching || !st.depth) return;
     const nodesTxt = st.nodes >= 1000000 ? (st.nodes / 1e6).toFixed(1) + "M"
       : st.nodes >= 1000 ? Math.round(st.nodes / 1000) + "k" : String(st.nodes);
-    $("liveDepth").textContent = `d${st.depth} · ${nodesTxt}n`;
-    $("topMovesMeta").textContent = `depth ${st.depth} · ${nodesTxt} nodes`;
+    $("liveDepth").textContent = `d${st.depth} ï¿½ ${nodesTxt}n`;
+    $("topMovesMeta").textContent = `depth ${st.depth} ï¿½ ${nodesTxt} nodes`;
   }
   setInterval(() => { pollEngineState().catch(() => {}); }, 300);
 
@@ -1087,7 +1087,7 @@
         <div class="evalswing-lbl"><span>before ${fmtEval(m.cpBefore, posB.mateWhite)}</span>
         <span>after ${fmtEval(m.cpAfter, state.review.positions[state.ply].mateWhite)}</span></div>
       </div>
-      ${(m.epl > 0.005 || m.loss > 25) ? `<div class="quiz-answer text-small" style="margin-top:8px">Quality loss: <b>${m.epl != null ? m.epl.toFixed(2) : "?"} EP</b> · <b>${Math.round(m.loss)} cp</b></div>` : ""}
+      ${(m.epl > 0.005 || m.loss > 25) ? `<div class="quiz-answer text-small" style="margin-top:8px">Quality loss: <b>${m.epl != null ? m.epl.toFixed(2) : "?"} EP</b> ï¿½ <b>${Math.round(m.loss)} cp</b></div>` : ""}
       <p class="coach">${m.comment || ""}</p>
       <div class="bestline">Best move: <b>${m.best.san}</b>
         <button class="btn btn-xs" id="rcShow" type="button">Show</button></div>
@@ -1160,14 +1160,14 @@
     const phaseName = { early: "Early game", middle: "Middle game", late: "Late game" };
     let html = `<table class="ttable"><tr><th>Phase</th><th>Moves</th><th>Avg time</th><th>Accuracy</th></tr>`;
     for (const [k, v] of Object.entries(tr.phase)) {
-      html += `<tr><td>${phaseName[k]}</td><td>${v.plies}</td><td>${v.avgTime ? v.avgTime.toFixed(1) + "s" : "—"}</td><td>${v.accuracy ? v.accuracy + "%" : "—"}</td></tr>`;
+      html += `<tr><td>${phaseName[k]}</td><td>${v.plies}</td><td>${v.avgTime ? v.avgTime.toFixed(1) + "s" : "ï¿½"}</td><td>${v.accuracy ? v.accuracy + "%" : "ï¿½"}</td></tr>`;
     }
     html += `</table>`;
-    const speedName = { fast: "< 5s / move", normal: "5–20s", slow: "> 20s" };
+    const speedName = { fast: "< 5s / move", normal: "5ï¿½20s", slow: "> 20s" };
     html += `<h4 class="panel-sub">Accuracy by time spent</h4><table class="ttable">
       <tr><th>Speed</th><th>Moves</th><th>Accuracy</th><th>Blunders</th></tr>`;
     for (const [k, v] of Object.entries(tr.bySpeed)) {
-      html += `<tr><td>${speedName[k]}</td><td>${v.moves}</td><td>${v.accuracy ? v.accuracy + "%" : "—"}</td><td>${v.blunders || 0}</td></tr>`;
+      html += `<tr><td>${speedName[k]}</td><td>${v.moves}</td><td>${v.accuracy ? v.accuracy + "%" : "ï¿½"}</td><td>${v.blunders || 0}</td></tr>`;
     }
     html += `</table>`;
     if (tr.timeTroubleErrors) html += `<p class="coach">? ${tr.timeTroubleErrors} serious error(s) were played in time trouble.</p>`;
@@ -1195,7 +1195,7 @@
       return `<div class="pcard"><div class="row">
         <span class="avatar ${color === "white" ? "w" : "b"}">${label[0]}</span>
         <div><div class="p-name">${p.name || label}</div>
-        <div class="est">played like a <b>${p.estRating}</b>-rated player · ACPL ${p.acpl}</div></div>
+        <div class="est">played like a <b>${p.estRating}</b>-rated player ï¿½ ACPL ${p.acpl}</div></div>
         <div style="margin-left:auto;text-align:right"><div class="big-acc">${p.accuracy}%</div>
         <div class="est">overall accuracy</div></div>
       </div>
@@ -1211,7 +1211,7 @@
     const el = $("accSummary");
     if (!state.review) {
       el.innerHTML = state.customFen
-        ? `<div class="accsum-empty">Custom position loaded — live analysis is running. See the Engine tab for lines, or play moves on the board to explore.</div>`
+        ? `<div class="accsum-empty">Custom position loaded ï¿½ live analysis is running. See the Engine tab for lines, or play moves on the board to explore.</div>`
         : `<div class="accsum-empty">Load a game and run a review to see accuracies, classifications and key moments here.</div>`;
       return;
     }
@@ -1233,8 +1233,8 @@
       </div>`;
     };
     const meta = [
-      g.eco ? `${g.eco} · ${g.opening}` : g.opening,
-      [g.Event, g.Date].filter(Boolean).join(" · "),
+      g.eco ? `${g.eco} ï¿½ ${g.opening}` : g.opening,
+      [g.Event, g.Date].filter(Boolean).join(" ï¿½ "),
       g.Result,
     ].filter(Boolean).join("  |  ");
     const nBad = (c) => R.moves.filter((m) => m.color === c && DRILL_CLASSES.includes(m.class)).length;
@@ -1324,7 +1324,7 @@
     $("accBottom").hidden = false; $("accBottom").textContent = botAcc + "%";
     $("eloTop").textContent = state.orientation === "white" ? (g.BlackElo || "") : (g.WhiteElo || "");
     $("eloBottom").textContent = state.orientation === "white" ? (g.WhiteElo || "") : (g.BlackElo || "");
-    $("analysisMeta").textContent = `${state.review.analysis.engine} · depth ${state.review.analysis.depth} · ${state.review.analysis.seconds || "?"}s`;
+    $("analysisMeta").textContent = `${state.review.analysis.engine} ï¿½ depth ${state.review.analysis.depth} ï¿½ ${state.review.analysis.seconds || "?"}s`;
     renderAccuracySummary();
     $("btnPgn").disabled = false; $("btnCopyPgn").disabled = false;
   }
@@ -1348,11 +1348,15 @@
     renderGameHead();
     switchTab("report");
     gotoPly(1);
+    if (res.pgnWarnings && res.pgnWarnings.length && !(opts && opts.silent)) {
+      // parse drop-outs / multi-game exports: loud, once, per fresh review
+      toast(res.pgnWarnings.join("  "), 7000);
+    }
     if (opts.silent) {
       toast("Previous session restored", 3000);
     } else {
       saveSession(res);
-      toast(`Review complete — White ${res.players.white.accuracy}% vs Black ${res.players.black.accuracy}%`, 4000);
+      toast(`Review complete ï¿½ White ${res.players.white.accuracy}% vs Black ${res.players.black.accuracy}%`, 4000);
     }
   }
 
@@ -1366,7 +1370,7 @@
   function saveSessionPos() {
     try { localStorage.setItem("crs_last_pos", JSON.stringify({ ply: state.ply })); } catch (e) { /* skip */ }
   }
-  /* explored line (moves played on top of a review position / custom position) —
+  /* explored line (moves played on top of a review position / custom position) ï¿½
      persisted so a page refresh puts you back exactly where you were exploring */
   function saveExplore() {
     try {
@@ -1490,7 +1494,7 @@
     if (!fen) { el.innerHTML = `<div class="empty-hint small">No position loaded.</div>`; return; }
     if (explorerCache.has(fen)) { paintExplorer(fen, explorerCache.get(fen)); return; }
     el.innerHTML = `<div class="empty-hint small">Looking up master games...</div>`;
-    $("explorerOpening").textContent = "—";
+    $("explorerOpening").textContent = "ï¿½";
     $("explorerMeta").textContent = "";
     explorerReqFen = fen;
     clearTimeout(explorerTimer);
@@ -1512,7 +1516,7 @@
 
   function paintExplorer(fen, res) {
     const op = res.opening;
-    $("explorerOpening").textContent = op && op.name ? `${op.eco ? op.eco + " · " : ""}${op.name}` : "Rarely played in master games";    $("explorerMeta").textContent = res.total ? `${res.total.toLocaleString()} master games reached this position` : "";
+    $("explorerOpening").textContent = op && op.name ? `${op.eco ? op.eco + " ï¿½ " : ""}${op.name}` : "Rarely played in master games";    $("explorerMeta").textContent = res.total ? `${res.total.toLocaleString()} master games reached this position` : "";
     const sanMap = new Map(board.legal.map((m) => [m.uci.slice(0, 4), m.san]));
     $("explorerList").innerHTML = (res.moves || []).map((m) => {
       const san = sanMap.get(m.uci.slice(0, 4)) || m.san || m.uci;
@@ -1543,10 +1547,10 @@
 
   /* ---------------- review flow ---------------- */
   const stageText = (s) => ({
-    starting: "Starting engine…",
-    book: "Checking opening theory (Lichess explorer)…",
-    engine: "Analyzing positions…",
-    classify: "Classifying moves & computing accuracy…",
+    starting: "Starting engineï¿½",
+    book: "Checking opening theory (Lichess explorer)ï¿½",
+    engine: "Analyzing positionsï¿½",
+    classify: "Classifying moves & computing accuracyï¿½",
     done: "Done",
   })[s] || s;
 
@@ -1565,9 +1569,9 @@
         $("progressFill").style.width = (m[1] === "book" ? pct * 15 : 15 + pct * 80) + "%";
         note = `${m[2]} of ${m[3]} ${m[1] === "book" ? "book moves checked" : "positions analyzed"}`;
       } else if (st.stage === "classify") {
-        $("progressFill").style.width = "96%"; note = "computing accuracy…";
+        $("progressFill").style.width = "96%"; note = "computing accuracyï¿½";
       } else if (st.stage === "starting") {
-        $("progressFill").style.width = "5%"; note = "engine warming up…";
+        $("progressFill").style.width = "5%"; note = "engine warming upï¿½";
       }
       if (st.stage !== lastStage) { $("progressStage").textContent = stageText(st.stage); lastStage = st.stage; }
       $("progressNote").textContent = note;
@@ -1595,7 +1599,7 @@
       try { localStorage.setItem("crs_job", jobId); } catch (e) { /* skip */ }
       const res = await pollJob(jobId);
       $("progressFill").style.width = "100%";
-      $("progressStage").textContent = "Loading review…";
+      $("progressStage").textContent = "Loading reviewï¿½";
       state._pgnMoves = res.moves.length;
       applyReview(res);
       hideModal();
@@ -1642,7 +1646,7 @@
     // still running: restore whatever was on screen beneath the progress, keep polling
     showModal();
     $("progressPane").hidden = false;
-    $("progressStage").textContent = "Resuming review…";
+    $("progressStage").textContent = "Resuming reviewï¿½";
     try {
       const res = await pollJob(jobId);
       if (localStorage.getItem("crs_job") === jobId) {
@@ -1689,7 +1693,7 @@
     const user = $("lichessUser").value.trim();
     if (!user) return;
     const el = $("lichessGames");
-    el.innerHTML = `<p class="text-muted">Fetching…</p>`;
+    el.innerHTML = `<p class="text-muted">Fetchingï¿½</p>`;
     try {
       const res = await post("/api/lichess/fetch", { username: user, max: 6 });
       const games = res.pgn.split("\n\n[Event ").map((g, i) => i === 0 ? g : "[Event " + g)
@@ -1721,7 +1725,7 @@
     const user = $("chesscomUser").value.trim();
     if (!user) { toast("Enter a chess.com username first"); return; }
     const el = $("chesscomGames");
-    el.innerHTML = `<p class="text-muted">Fetching recent games…</p>`;
+    el.innerHTML = `<p class="text-muted">Fetching recent gamesï¿½</p>`;
     try {
       const res = await post("/api/chesscom/fetch", {
         username: user, max: 8, timeClass: $("chesscomSpeed").value,
@@ -1732,7 +1736,7 @@
         b.type = "button";
         b.className = "game-pick";
         b.innerHTML = `<div class="t">${g.white} vs ${g.black} ${g.result}</div>
-          <div class="s">${g.timeClass} · ${g.date} · ${g.whiteRating ?? "?"} vs ${g.blackRating ?? "?"}</div>`;
+          <div class="s">${g.timeClass} ï¿½ ${g.date} ï¿½ ${g.whiteRating ?? "?"} vs ${g.blackRating ?? "?"}</div>`;
         b.onclick = () => {
           $("pgnText").value = g.pgn;
           el.querySelectorAll(".game-pick").forEach((x) => x.classList.remove("picked"));
@@ -1759,7 +1763,7 @@
   async function copyPgn() {
     if (!state.review) return;
     try { await navigator.clipboard.writeText(state.review.annotatedPgn); toast("PGN copied to clipboard"); }
-    catch { toast("Copy failed — use Download instead"); }
+    catch { toast("Copy failed ï¿½ use Download instead"); }
   }
 
   /* ---------------- engines ---------------- */
@@ -1773,7 +1777,7 @@
       const sf = res.engines.find((e) => e.id === "stockfish");
       if (sf) { $("engineSelect").value = "stockfish"; $("optEngine").value = "stockfish"; }
       $("engineInfo").innerHTML = res.engines.map((e) =>
-        `<div><b>${e.name}</b>${e.author ? " — " + e.author : ""} ${e.kind === "builtin" ? "(built-in)" : ""}${(e.warnings || []).length ? ' <span class="text-muted">? limited build</span>' : ""}</div>`
+        `<div><b>${e.name}</b>${e.author ? " ï¿½ " + e.author : ""} ${e.kind === "builtin" ? "(built-in)" : ""}${(e.warnings || []).length ? ' <span class="text-muted">? limited build</span>' : ""}</div>`
       ).join("");
     } catch (e) { toast("Could not load engines: " + e.message); }
   }
@@ -2019,8 +2023,8 @@
     const side = pz.fen.split(" ")[1] === "b" ? "Black" : "White";
     $("pzTurn").innerHTML = pz.finished
       ? (pz.solved ? "Solved!"
-                     : "Failed — press Retry to take another run at it.")
-      : `Find the best move for <b>${side}</b>${pz.wrong ? " · wrong move #" + pz.wrong : ""}`;
+                     : "Failed ï¿½ press Retry to take another run at it.")
+      : `Find the best move for <b>${side}</b>${pz.wrong ? " ï¿½ wrong move #" + pz.wrong : ""}`;
     paintPuzzleStats();
   }
 
@@ -2045,7 +2049,7 @@
     const btn = $("pzNew");
     btn.disabled = true;
     const label = btn.innerHTML;
-    btn.textContent = "Loading…";
+    btn.textContent = "Loadingï¿½";
     try {
       let data = await api("/api/puzzle?theme=" + encodeURIComponent(theme));
       // lichess can occasionally serve the same puzzle twice - one retry for variety
@@ -2067,7 +2071,7 @@
       paintPzPanel();
     } catch (e) {
       state.puzzle = null;
-      $("pzTurn").innerHTML = "No puzzle loaded — lichess.org unreachable?";
+      $("pzTurn").innerHTML = "No puzzle loaded ï¿½ lichess.org unreachable?";
       toast("Could not fetch a puzzle");
     } finally {
       btn.disabled = false;
@@ -2098,7 +2102,7 @@
         pzStats.solved++; pzStats.streak++; pzStats.best = Math.max(pzStats.best, pzStats.streak);
         pzSaveStats();
         $("pzSolved").hidden = false;
-        $("pzSolvedText").textContent = "Solved! +" + gain + " rating · streak " + pzStats.streak;
+        $("pzSolvedText").textContent = "Solved! +" + gain + " rating ï¿½ streak " + pzStats.streak;
         toast("Solved!", 2600);
       }
       puzzleRenderBoard();
@@ -2116,8 +2120,8 @@
     pz._revealFrom = pz.data.solution[pz.ply].slice(0, 2);
     puzzleRenderBoard();
     $("pzSolved").hidden = false;
-    $("pzSolvedText").textContent = "Failed · -" + loss + " rating · streak reset";
-    toast("That's not it — Retry to try again");
+    $("pzSolvedText").textContent = "Failed ï¿½ -" + loss + " rating ï¿½ streak reset";
+    toast("That's not it ï¿½ Retry to try again");
     paintPzPanel();
   }
 
@@ -2350,13 +2354,13 @@
       const qnum = q.drill
         ? `<div class="quiz-top"><b>${TARGET_SVG} Fix your ${mv.label.toLowerCase()}</b>
             <span class="text-muted">Mistake ${q.k + 1}/${q.plies.length}</span></div>
-          <div class="quiz-score">Game played: <b>${mv.san}</b> ${smallChip(mv.class)} · Score <b>${q.score}</b> / ${q.max}</div>`
+          <div class="quiz-score">Game played: <b>${mv.san}</b> ${smallChip(mv.class)} ï¿½ Score <b>${q.score}</b> / ${q.max}</div>`
         : `<div class="quiz-top"><b>${TARGET_SVG} Find the best move for ${Side}</b>
         <span class="text-muted">Question ${q.k + 1}/${q.plies.length}</span></div>
         <div class="quiz-score">Score <b>${q.score}</b> / ${q.max}</div>`;
       if (q.phase === "question") {
         const hNote = q.hintUsed
-          ? `<div class="quiz-note">Hint shown — the piece marked <b>?</b> on the board makes the best move. This question is now worth 5 points max.</div>` : "";
+          ? `<div class="quiz-note">Hint shown ï¿½ the piece marked <b>?</b> on the board makes the best move. This question is now worth 5 points max.</div>` : "";
         html = qnum + hNote + (q.drill
           ? `<div class="quiz-hint text-small text-muted">In the game, ${Side} went wrong here. Find and play the improving move instead - graded by eval loss vs the engine's best. No peeking at the Engine tab.</div>`
           : `<div class="quiz-hint text-small text-muted">Play your guess on the board. You are graded by eval loss, like the review. No peeking at the Engine tab.</div>`) + `
@@ -2367,13 +2371,13 @@
         const L = q.last;
         if (L.skipped) {
           html = qnum + `<div class="quiz-result"><span class="chip cls-forced">?</span>
-            <div><b>Skipped.</b> Best was <b>${L.bestSan}</b> · game played ${L.gameSan} (${L.gameLabel})</div></div>`;
+            <div><b>Skipped.</b> Best was <b>${L.bestSan}</b> ï¿½ game played ${L.gameSan} (${L.gameLabel})</div></div>`;
         } else {
           const lossTxt = L.grade.cls !== "best" && L.loss > 0 ? ` <span class="text-muted">(&minus;${(L.loss / 100).toFixed(1)})</span>` : "";
           const hintTxt = L.hint ? ` <span class="q-hint-mark">(hint)</span>` : "";
           html = qnum + `<div class="quiz-result">${chip(L.grade.cls, true)}
             <div><b>${L.grade.label}!</b> you played <b>${L.guessSan}</b>${lossTxt}${hintTxt}</div></div>
-            <div class="quiz-answer text-small">Best: <b>${L.bestSan}</b> · game played: ${L.gameSan} (${L.gameLabel})</div>`;
+            <div class="quiz-answer text-small">Best: <b>${L.bestSan}</b> ï¿½ game played: ${L.gameSan} (${L.gameLabel})</div>`;
         }
         html += `<div class="ed-btns"><button class="btn btn-primary btn-sm" id="qNext" type="button">${q.k + 1 >= q.plies.length ? (q.drill ? "Finish drill" : "Finish") : (q.drill ? "Next mistake" : "Next")}</button>
           <button class="btn btn-xs" id="qQuit" type="button">Quit</button></div>`;
@@ -2454,7 +2458,7 @@
       const r = g.review;
       const acc = `${r.players.white.accuracy}% / ${r.players.black.accuracy}%`;
       const meta = [r.game.opening, r.game.Result, new Date(g.savedAt).toLocaleDateString()]
-        .filter(Boolean).join(" · ");
+        .filter(Boolean).join(" ï¿½ ");
       return `<div class="lib-row" data-id="${g.id}">
         <div><div class="lib-name">${libGameName(g)}</div><div class="lib-sub">${meta}</div></div>
         <span class="lib-acc">${acc}<br><small>accuracy</small></span>
@@ -2532,11 +2536,11 @@
     state.repCurrent = res;
     if (res.rootFen) $("repRoot").value = "current";
     else $("repRoot").value = "start";
-    $("repSummary").innerHTML = `<b>${res.lines.length}</b> lines for <b>${res.side}</b> (${res.mode}) ·
-      ${res.stats.queries} database positions checked · ${res.stats.evals ? res.stats.evals + " engine checks" : "explorer stats only"}`;
+    $("repSummary").innerHTML = `<b>${res.lines.length}</b> lines for <b>${res.side}</b> (${res.mode}) ï¿½
+      ${res.stats.queries} database positions checked ï¿½ ${res.stats.evals ? res.stats.evals + " engine checks" : "explorer stats only"}`;
     if (!res.lines.length) {
       $("repLines").innerHTML = `<div class="empty-hint small">No lines could be built for these settings.
-        If builds keep failing, add a free Lichess API token in ? settings — the explorer needs it for fresh positions.</div>`;
+        If builds keep failing, add a free Lichess API token in ? settings ï¿½ the explorer needs it for fresh positions.</div>`;
       repStopPreview();
       return;
     }
@@ -2681,7 +2685,7 @@
     try {
       const body = {
         id: repAutoId(res),
-        name: `${res.side === "white" ? "White" : "Black"} · ${res.mode} · ${res.lines.length} lines`,
+        name: `${res.side === "white" ? "White" : "Black"} ï¿½ ${res.mode} ï¿½ ${res.lines.length} lines`,
         side: res.side, mode: res.mode, rootFen: res.rootFen || "",
         data: { lines: res.lines, pgn: res.pgn, stats: res.stats },
       };
@@ -2701,13 +2705,13 @@
       return;
     }
     if (!state.repSaved.length) {
-      el.innerHTML = `<div class="empty-hint small">Nothing saved yet — build a repertoire above and it is saved here automatically.</div>`;
+      el.innerHTML = `<div class="empty-hint small">Nothing saved yet ï¿½ build a repertoire above and it is saved here automatically.</div>`;
       return;
     }
     el.innerHTML = state.repSaved.map((g) => `
       <div class="lib-row" data-id="${g.id}">
         <div><div class="lib-name rep-name" data-id="${g.id}">${g.name}</div>
-          <div class="lib-sub">${g.side} · ${g.mode} · ${g.lines} lines · ${new Date(g.updatedAt * 1000).toLocaleDateString()}</div></div>
+          <div class="lib-sub">${g.side} ï¿½ ${g.mode} ï¿½ ${g.lines} lines ï¿½ ${new Date(g.updatedAt * 1000).toLocaleDateString()}</div></div>
         <span class="lib-actions">
           <button class="btn btn-xs rep-open" type="button">Open</button>
           <button class="btn btn-xs rep-train" type="button">?? Train</button>
@@ -2790,15 +2794,15 @@
       repPaint(res);
       if (res.lines.length) {
         $("repStatus").hidden = false;
-        $("repStatus").textContent = `? Built and auto-saved to your library (${res.lines.length} lines) — it will still be here after refreshing.`;
+        $("repStatus").textContent = `? Built and auto-saved to your library (${res.lines.length} lines) ï¿½ it will still be here after refreshing.`;
       } else {
         $("repStatus").hidden = false;
-        $("repStatus").textContent = "0 lines built — see the note above the results.";
+        $("repStatus").textContent = "0 lines built ï¿½ see the note above the results.";
       }
     } catch (e) {
       $("repStatus").hidden = false;
       if (/token/i.test(e.message)) {
-        $("repStatus").textContent = "Build failed: the Lichess explorer needs a free API token — open ? settings and paste one from lichess.org/account/oauth/token";
+        $("repStatus").textContent = "Build failed: the Lichess explorer needs a free API token ï¿½ open ? settings and paste one from lichess.org/account/oauth/token";
       } else {
         $("repStatus").textContent = "Build failed: " + e.message;
       }
@@ -2926,7 +2930,7 @@
       t.phase = "user";
       await repTrainRenderBoard();
       t.feedback = t.feedback.kind === "info" && t.path.length
-        ? t.feedback : { kind: "info", text: "Your move — play the repertoire move." };
+        ? t.feedback : { kind: "info", text: "Your move ï¿½ play the repertoire move." };
       repTrainRender();
       return;
     }
@@ -2977,13 +2981,13 @@
     if (!child) {
       t.stats.wrong++;
       const expected = node.children.values().next().value;
-      t.feedback = { kind: "wrong", text: `Not in your repertoire — the move is ${expected ? expected.san : "?"}. Try again.` };
+      t.feedback = { kind: "wrong", text: `Not in your repertoire ï¿½ the move is ${expected ? expected.san : "?"}. Try again.` };
       board.setArrows(expected ? [{ uci: expected.uci, color: "rgba(129,182,76,.95)", width: 0.22 }] : []);
       repTrainRender();
       return;
     }
     t.stats.correct++;
-    t.feedback = { kind: "correct", text: `Correct — ${child.san}` };
+    t.feedback = { kind: "correct", text: `Correct ï¿½ ${child.san}` };
     try {
       const r = await post("/api/move", { fen: t.curFen, uci: child.uci });
       child.fen = r.fen;
@@ -3003,16 +3007,16 @@
     const acc = t.stats.total ? Math.round((t.stats.correct / t.stats.total) * 100) : 100;
     const feedbackCls = t.feedback.kind === "correct" ? "cls-best" : t.feedback.kind === "wrong" ? "cls-blunder" : "cls-forced";
     const feedbackSym = t.feedback.kind === "correct" ? "?" : t.feedback.kind === "wrong" ? "?" : "?";
-    let html = `<div class="quiz-top"><b>Train on repertoire</b><span class="text-muted">${t.name} · as ${t.side}</span></div>
-      <div class="quiz-score">? ${t.stats.correct} · ? ${t.stats.wrong} · accuracy <b>${acc}%</b>
-        · lines <b>${t.stats.lines}</b> · moves <b>${t.stats.total}</b></div>
+    let html = `<div class="quiz-top"><b>Train on repertoire</b><span class="text-muted">${t.name} ï¿½ as ${t.side}</span></div>
+      <div class="quiz-score">? ${t.stats.correct} ï¿½ ? ${t.stats.wrong} ï¿½ accuracy <b>${acc}%</b>
+        ï¿½ lines <b>${t.stats.lines}</b> ï¿½ moves <b>${t.stats.total}</b></div>
       <div class="quiz-result"><span class="chip ${feedbackCls}">${feedbackSym}</span>
         <div>${t.feedback.text}</div></div>
       <div class="ed-btns"><button class="btn btn-xs" id="qQuit" type="button">Quit training</button></div>`;
     if (t.phase === "done") {
       const acc2 = t.stats.total ? Math.round((t.stats.correct / t.stats.total) * 100) : 100;
       html = `<div class="quiz-top"><b>Training complete</b><span class="text-muted">${t.name}</span></div>
-        <div class="quiz-score">Score: <b>${t.stats.correct}/${t.stats.total}</b> (${acc2}% accuracy) ·
+        <div class="quiz-score">Score: <b>${t.stats.correct}/${t.stats.total}</b> (${acc2}% accuracy) ï¿½
           ${t.stats.lines} line${t.stats.lines === 1 ? "" : "s"} completed</div>
         <div class="ed-btns"><button class="btn btn-primary btn-sm" id="qAgain" type="button">Train again</button>
           <button class="btn btn-xs" id="qQuit" type="button">Close</button></div>`;
@@ -3124,7 +3128,7 @@
     if (!f) return;
     const text = await f.text();
     $("pgnText").value = text;
-    $("pgnFilePreview").textContent = text.slice(0, 400) + (text.length > 400 ? "…" : "");
+    $("pgnFilePreview").textContent = text.slice(0, 400) + (text.length > 400 ? "ï¿½" : "");
   };
   $("btnSettings").onclick = () => { $("modalSettings").hidden = false; };
   $("setClose").onclick = () => ($("modalSettings").hidden = true);
