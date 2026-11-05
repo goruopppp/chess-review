@@ -656,10 +656,7 @@
 
   /* ---------------- play vs engine (a keyed sidebar session, not analysis) ---------------- */
   function updatePlayBotUi() {
-    const chk = $("chkPlayEngine");
-    const lbl = chk && chk.closest(".chk");
-    if (chk) chk.checked = !!state.playBot;
-    if (lbl) lbl.hidden = !!state.playBot;   // the sidebar button owns the toggle now
+    if ($("eloSelect")) $("eloSelect").hidden = !state.playBot;
     if ($("btnBotHint")) $("btnBotHint").hidden = !state.playBot;
     $("btnPlayBot").classList.toggle("bot-on", !!state.playBot);
     $("btnPlayBot").title = state.playBot
@@ -743,12 +740,8 @@
       else { state.explore.moves.push(entry); state.explore.redo = []; saveExplore(); }
       classifyLastExploreMove();   // don't wait for the live loop: a delivered mate
                                    // never yields eval lines, so it must run now
-      if ($("chkPlayEngine").checked) {
-        renderBoard();
-        await engineReply();
-      } else {
-        renderBoard();
-      }
+      renderBoard();
+      if (state.playBot) await engineReply();
     } catch (e) {
       toast("Illegal move");
     }
