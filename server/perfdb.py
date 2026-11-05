@@ -420,6 +420,24 @@ def overall():
             " SUM(blunders), SUM(mistakes), SUM(inaccuracies), SUM(misses),"
             " SUM(brilliant), SUM(great) FROM reviews").fetchone()
         reviewed_count = conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
+        phase_rows = conn.execute(
+            "SELECT r.phase_json FROM games g JOIN reviews r ON r.game_id = g.id").fetchall()
+
+        def _avg_ph(name):
+            vals = []
+            for (pj,) in phase_rows:
+                try:
+                    d2 = json.loads(pj or "{}")
+                except Exception:
+                    continue
+                for side in ((d2.get("white") or {}), (d2.get("black") or {})):
+                    pa = (side.get(name) or {}).get("accuracy") if isinstance(side, dict) else None
+                    if isinstance(pa, (int, float)):
+                        vals.append(pa)
+            return round(sum(vals) / len(vals), 1) if vals else None
+
+        phase_stats = {"opening": _avg_ph("opening"), "middlegame": _avg_ph("middlegame"),
+                       "endgame": _avg_ph("endgame"), "n": len(phase_rows)}
     wins = sum(v for k, v in wl if k == "1-0")
     losses = sum(v for k, v in wl if k == "0-1")
     draws = sum(v for k, v in wl if k == "1/2-1/2")
@@ -444,6 +462,7 @@ def overall():
         "total": total,
         "wins": wins, "losses": losses, "draws": draws,
         "reviewedGames": reviewed_count,
+        "phaseStats": phase_stats,
         "decidedGames": decided,
         "winRate": round(100 * wins / decided, 1) if decided else None,
         "drawRate": round(100 * draws / decided, 1) if decided else None,
