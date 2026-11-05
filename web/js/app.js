@@ -437,7 +437,7 @@
   }
 
   /* watch a line: replay an engine PV move-by-move on the board, then snap back */
-  const LINE_MOVE_MS = 750, LINE_LINGER_MS = 1400, LINE_MAX_MOVES = 16;
+  const LINE_MOVE_MS = 260, LINE_LINGER_MS = 600, LINE_MAX_MOVES = 24;
   function killLinePlay() {          // cancel playback without re-rendering the board
     if (!state.linePlay) return;
     state.linePlay.playing = false;
@@ -455,16 +455,25 @@
     if (!fen) return;
     const ln = currentLines()[ip];
     if (!ln || !ln.pv || !ln.pv.length) return;
-    // build the fen chain first so an engine hiccup aborts before the board moves
-    const steps = [];
-    let f = fen;
+    // whole PV in one server call (instant start); crawl the old way only if
+    // the bulk route is missing on an older server
+    let steps = null;
     try {
-      for (const uci of ln.pv.slice(0, LINE_MAX_MOVES)) {
-        const r = await post("/api/move", { fen: f, uci });
-        steps.push({ uci, fen: r.fen });
-        f = r.fen;
-      }
-    } catch (e) { toast("Line replay failed: " + e.message); return; }
+      const ucis = ln.pv.slice(0, LINE_MAX_MOVES);
+      const r = await post("/api/move/chain", { fen, ucis });
+      steps = ucis.map((uci, k) => ({ uci, fen: r.fens[k + 1] }));
+    } catch (e) { /* fall through and crawl */ }
+    if (!steps) {
+      steps = [];
+      let f = fen;
+      try {
+        for (const uci of ln.pv.slice(0, LINE_MAX_MOVES)) {
+          const r = await post("/api/move", { fen: f, uci });
+          steps.push({ uci, fen: r.fen });
+          f = r.fen;
+        }
+      } catch (e2) { toast("Line replay failed: " + e2.message); return; }
+    }
     if (!steps.length) return;
     state.linePlay = { i: ip, base: fen, steps, playing: true };
     state.liveSuspended = true;
