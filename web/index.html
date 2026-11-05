@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=64">
+<link rel="stylesheet" href="css/style.css?v=65">
 </head>
 <body>
 <div class="app-shell">
@@ -421,51 +421,49 @@
     </div>
 
     <div class="tab-body" id="tab-lab" role="tabpanel" hidden>
-      <div class="lab-head">
-        <div>
-          <h3 class="lab-title">Performance Lab</h3>
-          <p class="lab-sub">Every reviewed game, distilled into measurable patterns.</p>
+      <div class="lab-page">
+        <div class="lab-head">
+          <div class="lab-brand">
+            <span class="lab-knight" aria-hidden="true">&#9822;</span>
+            <div>
+              <h3 class="lab-title">Performance Lab</h3>
+              <p class="lab-sub">Every game you've played, turned into measurable progress.</p>
+            </div>
+          </div>
+          <div class="lab-actions">
+            <button id="labImportBtn" class="lab-btn lab-btn-primary" type="button">&#8682; Import file</button>
+            <input type="file" id="labImportFile" accept=".pgn,application/x-chess-pgn" hidden>
+            <button id="labImportPgnBtn" class="lab-btn" type="button">Paste PGN</button>
+            <button id="labRefreshBtn" class="lab-btn" type="button" title="Recompute from stored data">&#8635;</button>
+          </div>
         </div>
-        <div class="lab-actions">
-          <button id="labImportBtn" class="btn btn-sm btn-primary" type="button">Import PGN file</button>
-          <input type="file" id="labImportFile" accept=".pgn,application/x-chess-pgn" hidden>
-          <button id="labImportPgnBtn" class="btn btn-sm" type="button">Paste PGN</button>
-          <button id="labRefreshBtn" class="btn btn-sm" type="button">Refresh</button>
-        </div>
-      </div>
 
-      <div class="lab-hero" id="labHero"></div>
+        <div class="lab-hero-grid" id="labHero"></div>
 
-      <div class="lab-section">
-        <div class="lab-section-head">
-          <h4 class="lab-section-title">Weakness Fingerprint</h4>
-          <span class="text-small text-muted" id="labWeaknessMeta"></span>
+        <div class="lab-card lab-phase-card">
+          <div class="lab-card-title"><span>Accuracy by phase</span><span class="lab-meta" id="labPhaseMeta"></span></div>
+          <div id="labPhaseBars" class="lab-phase-bars"></div>
         </div>
-        <div id="labWeaknessCards" class="lab-weakness-grid"></div>
-      </div>
 
-      <div class="lab-section">
-        <div class="lab-section-head">
-          <h4 class="lab-section-title">Opening Families</h4>
-          <span class="text-small text-muted">win rate by games, low sample flagged</span>
+        <div class="lab-card">
+          <div class="lab-card-title"><span>Weakness fingerprint</span><span class="lab-meta" id="labWeaknessMeta"></span></div>
+          <div id="labWeaknessCards" class="lab-weakness-list"></div>
         </div>
-        <div id="labOpeningRows" class="lab-opening-list"></div>
-      </div>
 
-      <div class="lab-section">
-        <div class="lab-section-head">
-          <h4 class="lab-section-title">Next — Train the leak</h4>
-          <span class="text-small text-muted">ranked by your own data</span>
+        <div class="lab-card">
+          <div class="lab-card-title"><span>Opening families</span><span class="lab-meta">win rate &middot; low samples flagged</span></div>
+          <div id="labOpeningRows" class="lab-opening-list"></div>
         </div>
-        <div id="labRecList" class="lab-rec-list"></div>
-      </div>
 
-      <div class="lab-section">
-        <div class="lab-section-head">
-          <h4 class="lab-section-title">Imported games</h4>
-          <span class="text-small text-muted" id="labGameMeta"></span>
+        <div class="lab-card">
+          <div class="lab-card-title"><span>Next — train the leak</span><span class="lab-meta">ranked by your own data</span></div>
+          <div id="labRecList" class="lab-rec-list"></div>
         </div>
-        <div id="labGameList" class="lab-game-list"></div>
+
+        <div class="lab-card">
+          <div class="lab-card-title"><span>Imported games</span><span class="lab-meta" id="labGameMeta"></span></div>
+          <div id="labGameList" class="lab-game-list"></div>
+        </div>
       </div>
     </div>
 
@@ -725,6 +723,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=64"></script>
+<script src="js/app.js?v=65"></script>
 </body>
 </html>
