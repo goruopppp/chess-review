@@ -169,10 +169,13 @@ class UciEngine:
 
     # ---------- analysis ----------
     def analyse(self, fen: str, depth: int = 14, multipv: int = 3, timeout: float = 120.0,
-                movetime: int | None = None):
+                movetime: int | None = None, options: dict | None = None):
         """Returns list of dicts: {'cp': mover-pov cp (mates encoded), 'mate': plies or None,
         'pv': [uci moves]} ordered best-first. Search stops at depth OR movetime, whichever
-        comes first (movetime keeps reviews predictable on slow machines)."""
+        comes first (movetime keeps reviews predictable on slow machines).
+        `options`: extra UCI setoptions for this search only (e.g. a strength limit).
+        Callers that pass none get full strength, so a limited 'vs engine' session
+        never leaks into reviews or live analysis."""
         with self.lock:
             if not self.alive:
                 try:
@@ -181,6 +184,8 @@ class UciEngine:
                     pass
                 self._start()
             self._send(f"setoption name MultiPV value {multipv}")
+            for k, v in (options or {"UCI_LimitStrength": "false"}).items():
+                self._send(f"setoption name {k} value {v}")
             self._send(f"position fen {fen}")
             self.search_info.update({"searching": True, "depth": 0, "nodes": 0, "nps": 0,
                                      "time": 0, "fen": fen})
