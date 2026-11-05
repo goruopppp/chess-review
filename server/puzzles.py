@@ -19,7 +19,6 @@ HEADERS = {
     "Accept": "application/json",
 }
 CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "puzzle_cache.json"
-CACHE_TTL = 900          # seconds an entry stays fresh on disk
 MAX_CACHE_ENTRIES = 48   # trim the file so it cannot grow unbounded
 
 _lock = threading.Lock()
@@ -73,26 +72,20 @@ def _normalize(payload):
 
 
 def get_puzzle(theme=""):
-    """Returns one normalized puzzle dict; falls back to stale cache if offline."""
+    """Returns one normalized puzzle dict, always fresh from lichess when the
+    network cooperates; the on-disk cache is ONLY an offline fallback."""
     theme = (theme or "").strip()
     key = theme or "_any"
-    stale = None
-    with _lock:
-        cache = _cache_load()
-        entry = cache.get(key)
-        if entry:
-            age = time.time() - entry.get("ts", 0)
-            if age < CACHE_TTL:
-                return entry["puzzle"]
-            stale = entry.get("puzzle")
     try:
         r = requests.get(NEXT_URL, params=({"angle": theme} if theme else {}),
                          headers=HEADERS, timeout=14)
         r.raise_for_status()
         puzzle = _normalize(r.json())
     except Exception:
-        if stale is not None:
-            out = dict(stale)
+        with _lock:
+            entry = _cache_load().get(key)
+        if entry and entry.get("puzzle"):
+            out = dict(entry["puzzle"])
             out["stale"] = True
             return out
         raise
