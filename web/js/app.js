@@ -2116,6 +2116,7 @@
       if (dump.length < 2500000) localStorage.setItem("crs_last_rep", dump);
     } catch (e) { /* quota - skip */ }
     if (!opts.noSave) repAutoSave(res);
+    repPrefetchFens(); // warm FEN caches in the background so line clicks are instant
   }
 
   function repRestoreLast() {
@@ -2131,7 +2132,7 @@
     return false;
   }
 
-  /* ---- clicked-line preview: animate the line up to the clicked move ---- */
+  /* ---- clicked-line preview: jump straight to the clicked position ---- */
   const REP_HL = "rgba(38,194,163,.9)"; // teal, clearly distinct from engine/user arrows
   let repPreviewSeq = 0;
 
@@ -2144,6 +2145,31 @@
     renderBoard(); // snap back to the game/position you were on
   }
 
+  // one bulk call gets the whole line's positions; cached on the line object so
+  // repeat clicks (and prefetching) are pure client-side, zero server work
+  async function repLineFens(line) {
+    if (line._fens) return line._fens;
+    const res = state.repCurrent;
+    let fens = null;
+    try {
+      const r = await post("/api/move/chain", {
+        fen: res.rootFen || START_FEN, ucis: line.moves.map((m) => m.uci),
+      });
+      fens = r.fens;
+    } catch (e) { /* older server without the bulk route: crawl the old way */ }
+    if (!fens || fens.length !== line.moves.length + 1) {
+      fens = [res.rootFen || START_FEN];
+      for (const m of line.moves) {
+        try {
+          const r = await post("/api/move", { fen: fens[fens.length - 1], uci: m.uci });
+          fens.push(r.fen);
+        } catch (e) { toast("Preview failed: " + e.message); throw e; }
+      }
+    }
+    line._fens = fens;
+    return fens;
+  }
+
   async function repPreviewLine(li, mi) {
     const res = state.repCurrent;
     if (!res || !res.lines || !res.lines[li]) return;
@@ -2153,29 +2179,29 @@
     document.querySelectorAll("#repLines .rep-line").forEach((r, n) => r.classList.toggle("selected", n === li));
     document.querySelectorAll("#repLines .rep-mv").forEach((m) =>
       m.classList.toggle("seen", +m.dataset.li === li && +m.dataset.mi <= mi));
-    // build the FEN chain first so an aborted fetch can never desync the board
-    let f = res.rootFen || START_FEN;
-    const fens = [f];
-    for (const m of line.moves) {
-      try {
-        const r = await post("/api/move", { fen: f, uci: m.uci });
-        f = r.fen;
-      } catch (e) { toast("Preview failed: " + e.message); return; }
-      fens.push(f);
-      if (seq !== repPreviewSeq) return; // user clicked something else
-    }
-    for (let k = 0; k <= mi; k++) {
-      if (seq !== repPreviewSeq) return;
-      const uci = line.moves[k].uci;
-      // setPosition triggers the board's glide animation (single-move diff)
-      board.setPosition(fens[k + 1], { lastMove: uci, badge: null, arrows: [], legal: [] });
-      board.userSquares = [{ sq: uci.slice(0, 2), color: REP_HL }, { sq: uci.slice(2, 4), color: REP_HL }];
-      board.renderArrows();
-      const end = Date.now() + (k === mi ? 260 : 340);
-      while (Date.now() < end) {
-        if (seq !== repPreviewSeq) return;
-        await sleep(60);
-      }
+    let fens;
+    try { fens = await repLineFens(line); } catch (e) { return; }
+    if (seq !== repPreviewSeq) return;            // clicked something else meanwhile
+    if (!$("quizPanel").hidden || state.repTrain) return; // training took over
+    const anim = animEnabled();                   // instant jump: no glide animation
+    if (anim && board.setAnimation) board.setAnimation(false);
+    board.setPosition(fens[mi + 1], { lastMove: line.moves[mi].uci, badge: null, arrows: [], legal: [] });
+    board.userSquares = [{ sq: line.moves[mi].uci.slice(0, 2), color: REP_HL },
+                         { sq: line.moves[mi].uci.slice(2, 4), color: REP_HL }];
+    board.renderArrows();
+    if (anim && board.setAnimation) board.setAnimation(true);
+  }
+
+  // background precompute: fill every line's FEN cache right after a build/restore
+  let repPrefetchJob = 0;
+  async function repPrefetchFens() {
+    const res = state.repCurrent;
+    if (!res || !res.lines) return;
+    const job = ++repPrefetchJob;
+    for (const line of res.lines.slice(0, 60)) {
+      if (job !== repPrefetchJob || line._fens) continue;
+      await repLineFens(line).catch(() => {});
+      await sleep(40); // stay gentle on the server
     }
   }
 
