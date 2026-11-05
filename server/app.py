@@ -324,6 +324,16 @@ def api_lichess_token_get():
     return jsonify({"set": openings.has_token()})
 
 
+@app.get("/api/puzzle")
+def api_puzzle():
+    """One fresh Lichess puzzle (id, rating, themes, solution, FEN)."""
+    from server import puzzles
+    try:
+        return jsonify(puzzles.get_puzzle(request.args.get("theme") or ""))
+    except Exception as e:
+        return jsonify({"error": f"puzzle fetch failed: {e}"}), 502
+
+
 _rjobs = {}
 _rjobs_lock = threading.Lock()
 
