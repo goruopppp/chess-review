@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=55">
+<link rel="stylesheet" href="css/style.css?v=56">
 </head>
 <body>
 <div class="app-shell">
@@ -54,6 +54,7 @@
           </select>
         </span>
       </nav>
+      <span id="openingChip" class="opening-chip" hidden></span>
       <div id="serverStatus" class="status-dot" title="Engine status"></div>
     </header>
 
@@ -64,6 +65,15 @@
       <span>Exploring from <b id="exploreFrom"></b> | <span id="exploreMoveInfo">engine evaluates as you play</span></span>
       <span class="explore-controls">
         <label class="chk"><input type="checkbox" id="chkPlayEngine"> vs engine</label>
+        <select id="eloSelect" class="select" title="Engine level when 'vs engine' is on">
+          <option value="0" selected>Engine: full strength</option>
+          <option value="1400">Engine: ~1400 Elo</option>
+          <option value="1800">Engine: ~1800 Elo</option>
+          <option value="2200">Engine: ~2200 Elo</option>
+          <option value="2600">Engine: ~2600 Elo</option>
+          <option value="2900">Engine: ~2900 Elo</option>
+          <option value="3190">Engine: max (~3200)</option>
+        </select>
         <button id="btnExitExplore" class="btn btn-xs" type="button">Exit explore</button>
       </span>
     </div>
@@ -137,6 +147,12 @@
       </button>
       <button class="btn btn-icon" id="btnEnd" title="End (End key)" aria-label="Go to end">
         <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><rect x="16.6" y="5" width="2.4" height="14" rx="1" fill="currentColor"/><path d="M5 6.2v11.6a1 1 0 0 0 1.6.8l8-5.8a1 1 0 0 0 0-1.6l-8-5.8A1 1 0 0 0 5 6.2z" fill="currentColor"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btnShot" title="Save board as image" aria-label="Save board image">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 15.1a3.3 3.3 0 1 1 0-6.6 3.3 3.3 0 0 1 0 6.6z" fill="currentColor"/><path d="M9 4h6l1.4 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2.6L9 4zm3 5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="17.4" cy="9.6" r="1" fill="currentColor"/></svg>
+      </button>
+      <button class="btn btn-icon" id="btnShare" title="Copy share link to this position" aria-label="Copy share link">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 6.3a4.6 4.6 0 0 1 6.5 6.5l-2.2 2.2a4.6 4.6 0 0 1-6.5-1.4"/><path d="M10.6 17.7a4.6 4.6 0 0 1-6.5-6.5l2.2-2.2a4.6 4.6 0 0 1 6.5 1.4"/></g></svg>
       </button>
       <span class="move-pill" id="curMovePill">&#8212;</span>
     </div>
@@ -355,6 +371,7 @@
     <div class="modal-head">
       <h3 id="libTitle">Game Library</h3>
       <div class="lib-head-actions">
+        <input id="libSearch" class="input" placeholder="Search games…" style="width:160px" spellcheck="false">
         <button class="btn btn-primary btn-sm" id="btnLibSave" type="button">Save current game</button>
         <button class="btn btn-icon" id="libClose" type="button" aria-label="Close">
           <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>
@@ -488,6 +505,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=55"></script>
+<script src="js/app.js?v=56"></script>
 </body>
 </html>
