@@ -36,7 +36,7 @@ class RepertoireBuilder:
         self.root_fen = fen
         self.side = side
         self.mode = mode if mode in MODES else "mainline"
-        self.your_moves = max(2, min(8, int(your_moves or 5)))
+        self.your_moves = max(2, min(12, int(your_moves or 5)))
         self.breadth = max(1, min(4, int(breadth or 2)))
         self.use_engine = bool(use_engine)
         self.engine = engine
