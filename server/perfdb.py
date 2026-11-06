@@ -588,6 +588,82 @@ def metrics(color="white"):
     }
 
 
+def skill_series(color="white"):
+    """Per-game skill series for the Lab tiles (aimchess-style line charts).
+
+    Each skill is one value per reviewed game (date-sorted), so the tiles draw
+    the same jagged per-game progression the report cards need. Delta = second
+    half average vs first half average (trend), computed honestly; None when
+    there are fewer than 2 points on either side.
+    """
+    me = "white" if (color or "white").lower() != "black" else "black"
+    opp = "black" if me == "white" else "white"
+    target = {"rating": 85, "opening": 85, "middlegame": 85, "endgame": 85,
+              "tactics": 80, "time_mgmt": 80, "resourcefulness": 80}
+    series = {k: [] for k in target}   # key -> list of {"t","date","v"}
+    wdl = {"wins": 0, "losses": 0, "draws": 0, "total": 0}
+    win_key = "1-0" if me == "white" else "0-1"
+    loss_key = "0-1" if me == "white" else "1-0"
+    with _lock:
+        conn = _connect()
+        rows = conn.execute(
+            "SELECT g.date_ts, g.date, g.result, r.phase_json, r.moves_json,"
+            " r.white_acc, r.black_acc FROM games g JOIN reviews r ON r.game_id = g.id"
+            " GROUP BY g.id ORDER BY g.date_ts, g.created_at").fetchall()
+    for date_ts, date, result, pjk, mvj, wacc, bacc in rows:
+        wdl["total"] += 1
+        if result == win_key:
+            wdl["wins"] += 1
+        elif result == loss_key:
+            wdl["losses"] += 1
+        elif result == "1/2-1/2":
+            wdl["draws"] += 1
+        try:
+            mvs = json.loads(mvj or "[]")
+        except Exception:
+            mvs = []
+        own = [m for m in mvs if (m.get("color") or opp) == me]
+        add = series
+        acc_list = [m.get("accuracy") for m in own if isinstance(m.get("accuracy"), (int, float))]
+        if acc_list:
+            add["rating"].append({"t": date_ts, "date": date, "v": round(sum(acc_list) / len(acc_list), 1)})
+        try:
+            ph = json.loads(pjk or "{}").get(me) or {}
+        except Exception:
+            ph = {}
+        for ph_key, sk_key in (("opening", "opening"), ("middlegame", "middlegame"), ("endgame", "endgame")):
+            a = (ph.get(ph_key) or {}).get("accuracy")
+            if isinstance(a, (int, float)):
+                add[sk_key].append({"t": date_ts, "date": date, "v": round(a, 1)})
+        if own:
+            bls = sum(1 for m in own if m.get("class") == "blunder")
+            mN = len(own)
+            add["tactics"].append({"t": date_ts, "date": date,
+                                   "v": _blunderless_score(bls / mN * 100)})
+            tps = [m.get("timeSpent") for m in own if isinstance(m.get("timeSpent"), (int, float))]
+            if tps:
+                add["time_mgmt"].append({"t": date_ts, "date": date,
+                                         "v": _time_mgmt_score(sum(tps) / len(tps))})
+            big = any(isinstance(m.get("winBefore"), (int, float)) and abs(m["winBefore"]) >= 85 for m in own)
+            if big:
+                won = result == ("1-0" if me == "white" else "0-1")
+                add["resourcefulness"].append({"t": date_ts, "date": date, "v": 100 if won else 0})
+    out = {}
+    for key, pts in series.items():
+        pts.sort(key=lambda p: p["t"])
+        vals = [p["v"] for p in pts]
+        avg = round(sum(vals) / len(vals), 1) if vals else None
+        half = len(pts) // 2
+        delta = None
+        if half >= 1 and len(pts) - half >= 1 and half != len(pts):
+            first = sum(p["v"] for p in pts[:half]) / half
+            second = sum(p["v"] for p in pts[half:]) / (len(pts) - half)
+            if abs(first) > 0.01:
+                delta = round(100 * (second - first) / first)
+        out[key] = {"points": pts, "avg": avg, "target": target[key], "delta": delta}
+    return {"color": me, "wdl": wdl, "skills": out}
+
+
 def overall():
     with _lock:
         conn = _connect()
