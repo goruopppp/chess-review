@@ -2315,50 +2315,147 @@
   const labEscape = typeof trainerEsc === "function" ? trainerEsc : ((s) =>
     String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"));
 
-  const LAB_GLYPHS = { total: "&#9822;", winrate: "&#x2655;", accuracy: "&#9814;", blunders: "&#9873;", reviewed: "&#9822;", missed: "&#8626;" };
+  /* ---- v70 report tiles: per-game skill series, donut, details ---- */
+  const LAB_TILE_META = {
+    rating: { name: "Rating", basis: "Average of the engine's move accuracy across your own moves in each game. Target 85." },
+    opening: { name: "Opening", basis: "Average accuracy of your opening moves in each game. Target 85." },
+    middlegame: { name: "Middlegame", basis: "Average accuracy of your middlegame moves in each game. Target 85." },
+    endgame: { name: "Endgame", basis: "Average accuracy of your endgame moves in each game. Target 85." },
+    tactics: { name: "Tactics", basis: "Blunder-free score per game: 100 minus 20 for every blunder per 100 of your moves. Target 80." },
+    time_mgmt: { name: "Time management", basis: "Tempo score per game — 100 inside the 8\u201312s per move sweet spot, less when rushing or dwelling. Target 80." },
+    resourcefulness: { name: "Resourcefulness", basis: "For games where your engine win chance reached 85% or more: won = 100, lost = 0. Target 80." },
+  };
+  let labSeriesCache = null;
+  let labWdlCache = { wins: 0, draws: 0, losses: 0 };
 
-  function paintLabHero(d) {
-    const avgAcc = (d.avgAccuracy && d.avgAccuracy.white != null && d.avgAccuracy.black != null)
-      ? Math.round((d.avgAccuracy.white + d.avgAccuracy.black) / 2) : null;
-    const wr = d.decidedGames ? d.winRate : null;
-    const wrCls = wr == null ? "accent" : wr >= 55 ? "ok" : wr < 40 ? "hot" : "warn";
-    $("labHero").innerHTML =
-      `<div class="lab-hero-item"><span class="lab-hero-glyph">${LAB_GLYPHS.total}</span>`
-      + `<div class="lab-hero-num accent">${d.total}</div><div class="lab-hero-label">Games imported</div>`
-      + `<div class="lab-hero-sub">${d.reviewedGames || 0} reviewed</div></div>`
-      + `<div class="lab-hero-item"><span class="lab-hero-glyph">${LAB_GLYPHS.winrate}</span>`
-      + `<div class="lab-hero-num ${wrCls}">${wr == null ? "—" : wr + "%"}</div><div class="lab-hero-label">Win rate</div>`
-      + `<div class="lab-hero-sub">${d.decidedGames || 0} decided games</div></div>`
-      + `<div class="lab-hero-item"><span class="lab-hero-glyph">${LAB_GLYPHS.accuracy}</span>`
-      + `<div class="lab-hero-num ok">${avgAcc != null ? avgAcc + "%" : "—"}</div><div class="lab-hero-label">Avg accuracy</div>`
-      + `<div class="lab-hero-sub">ACPL ${d.avgACPL && d.avgACPL.white != null ? Math.round((d.avgACPL.white + d.avgACPL.black) / 2) : "—"}</div></div>`
-      + `<div class="lab-hero-item"><span class="lab-hero-glyph">${LAB_GLYPHS.blunders}</span>`
-      + `<div class="lab-hero-num ${(d.errorTotals.blunders || 0) > 0 ? "hot" : "ok"}">${d.errorTotals.blunders || 0}</div>`
-      + `<div class="lab-hero-label">Blunders</div>`
-      + `<div class="lab-hero-sub">${d.errorTotals.misses || 0} missed wins</div></div>`;
+  function labTile(skill) {
+    return document.querySelector(`.lab-tile[data-skill="${skill}"]`);
   }
 
-  function paintLabPhaseBars(d) {
-    const el = $("labPhaseBars");
-    const meta = $("labPhaseMeta");
-    const ps = d.phaseStats || {};
-    const n = ps.n || 0;
-    meta.textContent = n === 0 ? "no reviewed games yet" : `${n} reviewed game${n === 1 ? "" : "s"}`;
-    if (!n) {
-      el.innerHTML = `<div class="lab-empty">Review some games to unlock phase analysis.</div>`;
+  function paintLabSpark(svg, pts, avgV, targetV) {
+    if (!svg) return;
+    const W = 220, H = 76;
+    if (!pts.length) {
+      svg.innerHTML = `<text class="lab-ch-empty" x="110" y="40">No scored games yet</text>`;
       return;
     }
-    const row = (label, val, fillCls) => {
-      const missing = val == null;
-      const v = missing ? 0 : Math.round(val);
-      return `<div class="lab-phase-row"><span class="lab-phase-name">${label}</span>`
-        + `<span class="lab-phase-track"><span class="lab-phase-fill ${fillCls}" style="width:${v}%"></span></span>`
-        + `<span class="lab-phase-val">${missing ? "—" : v}</span></div>`;
-    };
-    // navy-reference gradient lanes: green → amber → red (open → end)
-    el.innerHTML = row("Opening", ps.opening, "")
-      + row("Middlegame", ps.middlegame, "mid")
-      + row("Endgame", ps.endgame, "late");
+    const padL = 2, padR = 2, padT = 7, padB = 17;
+    let lo = Math.min(...pts.map((p) => p.v));
+    let hi = Math.max(...pts.map((p) => p.v));
+    if (targetV != null) { lo = Math.min(lo, targetV); hi = Math.max(hi, targetV); }
+    if (avgV != null) { lo = Math.min(lo, avgV); hi = Math.max(hi, avgV); }
+    if (hi - lo < 6) {
+      const c = (hi + lo) / 2;
+      lo = c - 3; hi = c + 3;
+    }
+    const span = hi - lo || 1;
+    const y = (v) => padT + (H - padT - padB) * (1 - (v - lo) / span);
+    const x = (i) => (pts.length === 1 ? W / 2 : padL + (W - padL - padR) * (i / (pts.length - 1)));
+    const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+    const area = `${x(0).toFixed(1)},${(H - padB)} `
+      + pts.map((p, i) => `${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ")
+      + ` ${x(pts.length - 1).toFixed(1)},${H - padB}`;
+    let extra = "";
+    if (targetV != null) {
+      extra += `<line class="lab-ch-target" x1="${padL}" y1="${y(targetV).toFixed(1)}" x2="${W - padR}" y2="${y(targetV).toFixed(1)}"/>`;
+    }
+    if (avgV != null) {
+      extra += `<line class="lab-ch-avg" x1="${padL}" y1="${y(avgV).toFixed(1)}" x2="${W - padR}" y2="${y(avgV).toFixed(1)}"/>`;
+    }
+    let xl = "";
+    if (pts.length >= 2) {
+      xl = `<text class="lab-ch-x" x="${padL}" y="${H - 5}">${labEscape(String(pts[0].date || "").slice(5))}</text>`
+        + `<text class="lab-ch-x" x="${W - padR}" y="${H - 5}" text-anchor="end">${labEscape(String(pts[pts.length - 1].date || "").slice(5))}</text>`;
+    }
+    svg.innerHTML = `<polygon class="lab-ch-area" points="${area.trim()}"/><polyline class="lab-ch-line" points="${line}"/>${extra}${xl}`;
+  }
+
+  function paintLabDelta(el, delta) {
+    if (!el) return;
+    if (delta == null) {
+      el.className = "lab-delta flat";
+      el.textContent = "flat";
+      return;
+    }
+    el.className = "lab-delta " + (delta > 0 ? "up" : "down");
+    el.textContent = (delta > 0 ? "+" : "") + delta + "%";
+  }
+
+  function labSeriesStatsHtml(skill) {
+    const s = (labSeriesCache || {})[skill];
+    if (!s || !s.points || !s.points.length) return "No scored games yet.";
+    const vs = s.points.map((p) => p.v);
+    const last = vs[vs.length - 1];
+    return `avg <b>${s.avg}</b> &middot; last <b>${last}</b> &middot; best <b>${Math.max(...vs)}</b>`
+      + ` &middot; low <b>${Math.min(...vs)}</b> &middot; ${s.points.length} game${s.points.length === 1 ? "" : "s"}`
+      + ` &middot; target <b>${s.target}</b>`;
+  }
+
+  function labDonutStatsHtml(w) {
+    const n = w.wins + w.draws + w.losses;
+    return `<b>${n}</b> reviewed game${n === 1 ? "" : "s"} &middot; <b>${w.wins}</b> W &middot; <b>${w.losses}</b> L`
+      + ` &middot; <b>${w.draws}</b> D` + (n ? ` &middot; ${Math.round(100 * w.wins / n)}% wins` : "");
+  }
+
+  function paintLabSeries(skills) {
+    Object.keys(LAB_TILE_META).forEach((skill) => {
+      const tile = labTile(skill);
+      if (!tile) return;
+      const data = skills && skills[skill];
+      paintLabDelta(tile.querySelector(".lab-delta"), data && data.delta);
+      paintLabSpark(tile.querySelector(".lab-chart"), (data && data.points) || [], data && data.avg, data && data.target);
+    });
+  }
+
+  function paintLabDonut(wdl) {
+    const tile = labTile("games");
+    if (!tile) return;
+    const svg = tile.querySelector(".lab-donut");
+    const side = tile.querySelector(".lab-donut-side");
+    if (!svg) return;
+    const w = { wins: (wdl && wdl.wins) || 0, draws: (wdl && wdl.draws) || 0, losses: (wdl && wdl.losses) || 0 };
+    labWdlCache = w;
+    const total = w.wins + w.draws + w.losses;
+    const C = 2 * Math.PI * 40;
+    if (!total) {
+      svg.innerHTML = `<circle class="lab-dn-ring" cx="52" cy="52" r="40"/><text class="lab-dn-empty" x="52" y="56">No games</text>`;
+      if (side) side.innerHTML = `<div class="lab-ds-row">No reviewed games yet.</div>`;
+      return;
+    }
+    let inner = `<circle class="lab-dn-ring" cx="52" cy="52" r="40"/>`;
+    let off = 0;
+    [["wins", w.wins, "#2ebd59"], ["draws", w.draws, "#c3c8d4"], ["losses", w.losses, "#f0554d"]].forEach(([, n, col]) => {
+      if (!n) return;
+      const frac = n / total;
+      inner += `<circle class="lab-dn-seg" cx="52" cy="52" r="40" stroke="${col}"`
+        + ` stroke-dasharray="${(frac * C).toFixed(1)} ${(C - frac * C).toFixed(1)}"`
+        + ` stroke-dashoffset="${(-off * C).toFixed(1)}"/>`;
+      off += frac;
+    });
+    inner += `<text class="lab-dn-num" x="52" y="58">${total}</text><text class="lab-dn-sub" x="52" y="71">games</text>`;
+    svg.innerHTML = inner;
+    if (side) {
+      side.innerHTML =
+        `<div class="lab-ds-row"><span class="lab-ds-dot" style="background:#2ebd59"></span>Wins<b>${w.wins} (${total ? Math.round(100 * w.wins / total) : 0}%)</b></div>`
+        + `<div class="lab-ds-row"><span class="lab-ds-dot" style="background:#c3c8d4"></span>Draws<b>${w.draws} (${total ? Math.round(100 * w.draws / total) : 0}%)</b></div>`
+        + `<div class="lab-ds-row"><span class="lab-ds-dot" style="background:#f0554d"></span>Losses<b>${w.losses} (${total ? Math.round(100 * w.losses / total) : 0}%)</b></div>`;
+    }
+  }
+
+  function clearLabTiles() {
+    Object.keys(LAB_TILE_META).forEach((skill) => {
+      const tile = labTile(skill);
+      if (!tile) return;
+      const svg = tile.querySelector(".lab-chart");
+      if (svg) svg.innerHTML = `<text class="lab-ch-empty" x="110" y="40">No scored games yet</text>`;
+      paintLabDelta(tile.querySelector(".lab-delta"), null);
+      const panel = tile.querySelector(".lab-tile-detail");
+      if (panel) panel.hidden = true;
+    });
+    const gsvg = document.querySelector('.lab-tile[data-skill="games"] .lab-donut');
+    if (gsvg) gsvg.innerHTML = "";
+    const gside = document.querySelector('.lab-tile[data-skill="games"] .lab-donut-side');
+    if (gside) gside.innerHTML = "";
   }
 
   function paintLabWeaknesses(w) {
@@ -2426,6 +2523,7 @@
       b.classList.toggle("active", b.dataset.color === c);
     });
     loadLabMetrics();
+    loadLabSeries();
   }
   const mcls = (s) => (s == null ? "" : s >= 70 ? "ok" : s >= 40 ? "mid" : "bad");
 
@@ -2517,6 +2615,13 @@
       $("labMetricChips").innerHTML = `<div class="lab-empty">Behavior metrics unavailable — server still waking up.</div>`;
       $("labRadarNote").textContent = "";
     }
+  }
+
+  async function loadLabSeries() {
+    try {
+      const s = await api("/api/perf/series?color=" + getLabColor());
+      if (s && s.skills) { labSeriesCache = s.skills; paintLabSeries(s.skills); paintLabDonut(s.wdl); }
+    } catch (e) { /* keep whatever is on screen */ }
   }
 
   /* ---- daily workout: three drills picked from your weakest patterns ---- */
@@ -2620,18 +2725,25 @@
   async function refreshLab() {
     try {
       await perfSyncLibrary();   // v66: Library is the source of truth - re-attach missing reviewed games first
-      const [d, w, o, r, g, m] = await Promise.all([
-        api("/api/perf/overall"), api("/api/perf/weaknesses"),
-        api("/api/perf/openings"), api("/api/perf/recommendations"),
-        api("/api/perf/games?limit=30"), api("/api/perf/metrics?color=" + getLabColor()),
+      const [w, o, r, g, m, s] = await Promise.all([
+        api("/api/perf/weaknesses"), api("/api/perf/openings"),
+        api("/api/perf/recommendations"), api("/api/perf/games?limit=30"),
+        api("/api/perf/metrics?color=" + getLabColor()),
+        api("/api/perf/series?color=" + getLabColor()),
       ]);
-      paintLabHero(d); paintLabPhaseBars(d); paintLabWeaknesses(w); paintLabOpenings(o);
+      if (s && s.skills) { labSeriesCache = s.skills; paintLabSeries(s.skills); paintLabDonut(s.wdl); }
+      paintLabWeaknesses(w); paintLabOpenings(o);
       paintLabRecommendations(r); paintLabDaily(r.recommendations); paintLabGames(g.games || [], g.total);
       paintLabRadar(m); paintLabMetricChips(m); paintLabRadarNote(m);
     } catch (e) {
-      $("labHero").innerHTML = `<div class="lab-hero-item" style="grid-column:1/-1"><div class="lab-hero-label">Lab unavailable — is the server awake?</div></div>`;
-      $("labPhaseBars").innerHTML = ""; $("labWeaknessCards").innerHTML = "";
-      $("labOpeningRows").innerHTML = ""; $("labRecList").innerHTML = ""; $("labGameList").innerHTML = "";
+      clearLabTiles();
+      const ratingTile = labTile("rating");
+      if (ratingTile) {
+        const svg = ratingTile.querySelector(".lab-chart");
+        if (svg) svg.innerHTML = `<text class="lab-ch-empty" x="110" y="40">Lab unavailable \u2014 is the server awake?</text>`;
+      }
+      $("labWeaknessCards").innerHTML = ""; $("labOpeningRows").innerHTML = "";
+      $("labRecList").innerHTML = ""; $("labGameList").innerHTML = "";
       $("labRadar").innerHTML = ""; $("labMetricChips").innerHTML = "";
       $("labRadarNote").textContent = ""; $("labDailyList").innerHTML = "";
     }
@@ -2695,6 +2807,33 @@
   document.querySelectorAll("#labColorToggle .lab-seg").forEach((b) => {
     b.classList.toggle("active", b.dataset.color === getLabColor());
     b.onclick = () => setLabColor(b.dataset.color);
+  });
+
+  /* v70 tile actions: Details toggles an in-tile panel from real stats; Practice
+     leaves the Lab and opens the matching drill surface (Opening -> explorer,
+     everything else -> trainer). */
+  document.querySelectorAll("#labTiles .lab-tile").forEach((tile) => {
+    const skill = tile.dataset.skill;
+    const btnDetails = tile.querySelector('[data-act="details"]');
+    const btnPractice = tile.querySelector('[data-act="practice"]');
+    const panel = tile.querySelector(".lab-tile-detail");
+    if (btnDetails && panel) {
+      btnDetails.onclick = () => {
+        const open = panel.hidden;
+        if (open) {
+          panel.innerHTML = (skill === "games")
+            ? `Wins, draws and losses across every reviewed game here. ` + labDonutStatsHtml(labWdlCache)
+            : labEscape(LAB_TILE_META[skill].basis) + "<br>" + labSeriesStatsHtml(skill);
+        }
+        panel.hidden = !open;
+      };
+    }
+    if (btnPractice) {
+      btnPractice.onclick = () => {
+        showLab(false);
+        switchTab(skill === "opening" ? "explorer" : "trainer");
+      };
+    }
   });
 
   /* Lab is a full sidebar page (v66): btnLab opens it; Board button / Esc / btnLab closes it */
