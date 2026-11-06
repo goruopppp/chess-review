@@ -1484,7 +1484,6 @@
     if (name === "explorer") renderExplorer();
     if (name === "puzzle" && !state.puzzle) pzNew();
     if (name === "trainer") refreshTrainer();
-    if (name === "lab") refreshLab();
   }
 
   /* ---------------- opening explorer ---------------- */
@@ -2503,6 +2502,30 @@
     e.target.value = "";
   };
   $("labRefreshBtn").onclick = refreshLab;
+
+  /* Lab is a full sidebar page (v66): btnLab opens it; Board button / Esc / btnLab closes it */
+  let labOpen = false;
+  function showLab(open) {
+    labOpen = !!open;
+    $("viewLab").hidden = !labOpen;
+    const ma = document.querySelector(".main-area");
+    if (ma) ma.classList.toggle("lab-open", labOpen);
+    $("btnLab").classList.toggle("lab-on", labOpen);
+    $("btnLab").title = labOpen
+      ? "Back to the board"
+      : "Performance Lab - performance analytics across all your games";
+    if (labOpen) {
+      $("viewLab").scrollTop = 0;
+      refreshLab();
+    }
+  }
+  $("btnLab").onclick = () => showLab(!labOpen);
+  $("labBackBtn").onclick = () => showLab(false);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && labOpen && !document.querySelector(".modal-backdrop:not([hidden])")) {
+      showLab(false);
+    }
+  });
 
   /* ---------------- Lichess puzzles (v60) ---------------- */
   let pzStats = { solved: 0, streak: 0, best: 0, rating: 1200 };
