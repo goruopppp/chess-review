@@ -2411,6 +2411,171 @@
     }).join("");
   }
 
+  /* ---- aimchess-style behavior layer (v69): radar + chips + daily drills ---- */
+  let labColor = null;
+  function getLabColor() {
+    if (labColor) return labColor;
+    try { labColor = localStorage.getItem("crs_lab_color") === "black" ? "black" : "white"; }
+    catch (e) { labColor = "white"; }
+    return labColor;
+  }
+  function setLabColor(c) {
+    labColor = c;
+    try { localStorage.setItem("crs_lab_color", c); } catch (e) { /* private mode */ }
+    document.querySelectorAll("#labColorToggle .lab-seg").forEach((b) => {
+      b.classList.toggle("active", b.dataset.color === c);
+    });
+    loadLabMetrics();
+  }
+  const mcls = (s) => (s == null ? "" : s >= 70 ? "ok" : s >= 40 ? "mid" : "bad");
+
+  function paintLabRadar(m) {
+    const svg = $("labRadar");
+    if (!m || !m.radar || !m.radar.length) { svg.innerHTML = ""; return; }
+    const cx = 150, cy = 124, R = 86;
+    const ang = (i, n) => (Math.PI * 2 * i) / n - Math.PI / 2;
+    const pt = (i, n, r) => [cx + r * Math.cos(ang(i, n)), cy + r * Math.sin(ang(i, n))];
+    const n = m.radar.length;
+    const rings = [0.25, 0.5, 0.75, 1].map((f) =>
+      `<polygon class="lab-radar-grid" points="${
+        m.radar.map((_, i) => pt(i, n, R * f).map((v) => v.toFixed(1)).join(",")).join(" ")}"/>`).join("");
+    const spokes = m.radar.map((_, i) => {
+      const [x2, y2] = pt(i, n, R);
+      return `<line class="lab-radar-spoke" x1="${cx}" y1="${cy}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}"/>`;
+    }).join("");
+    let opt = "";
+    let dots = "", labels = "";
+    m.radar.forEach((axis, i) => {
+      const r = axis.v == null ? 0 : R * (Math.max(5, axis.v) / 100);
+      const [x, y] = pt(i, n, r);
+      opt += (i ? "" : "") + `${x.toFixed(1)},${y.toFixed(1)} `;
+      dots += `<circle class="lab-radar-dot ${axis.v == null ? "dim" : ""}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3"/>`;
+      const [lx, ly] = pt(i, n, R + 17);
+      const anchor = Math.abs(lx - cx) < 8 ? "middle" : lx > cx ? "start" : "end";
+      const dy = ly < cy ? -2 : 8;
+      labels += `<text class="lab-radar-label" x="${lx.toFixed(1)}" y="${(ly + dy).toFixed(1)}" text-anchor="${anchor}">${axis.axis}</text>`
+        + `<text class="lab-radar-val" x="${lx.toFixed(1)}" y="${(ly + dy + 11).toFixed(1)}" text-anchor="${anchor}">${axis.v == null ? "—" : axis.v}</text>`;
+    });
+    svg.innerHTML = `<g>${rings}${spokes}<polygon class="lab-radar-shape" points="${opt.trim()}"/></g>${dots}${labels}`;
+  }
+
+  function paintLabMetricChips(m) {
+    const el = $("labMetricChips");
+    if (!m) { el.innerHTML = ""; return; }
+    const chip = (score, name, sub, extra) => `
+      <div class="lab-mchip">
+        <span class="lab-mchip-num ${mcls(score)}">${score == null ? "—" : score}</span>
+        <span><div class="lab-mchip-name">${name}</div><div class="lab-mchip-sub">${sub}</div>
+          <div class="lab-mchip-track"><div class="lab-mchip-fill ${mcls(score)}" style="width:${score == null ? 0 : score}%"></div></div></span>
+        <span class="lab-mchip-val">${extra || ""}</span>
+      </div>`;
+    const dash = (a) => (a == null ? "—" : a);
+    el.innerHTML =
+      chip(m.speed, "Speed · impulsivity",
+        m.tpm == null ? "needs clocked games" : `${m.tpm}s / move average`,
+        m.tpm == null ? "—" : `${m.speed === null ? "" : m.speed >= 70 ? "quick play" : m.speed < 40 ? "slow play" : "balanced"}`) +
+      chip(m.aggression, "Aggression",
+        `${m.captureCount || 0} captures · ${m.checkCount || 0} checks`,
+        m.attackShare == null ? "—" : `${m.attackShare}%`) +
+      chip(m.timeMgmt, "Time management",
+        m.tpm == null ? "needs clocked games" : `${m.tpm}s / move`,
+        m.tpm == null ? "—" : m.timeMgmt >= 70 ? "healthy tempo" : m.timeMgmt < 40 ? "rushed or stuck" : "steady") +
+      chip(m.blunderless, "Error sanity",
+        `${m.blunders || 0} blunders · ${m.mistakes || 0} mistakes`,
+        m.blunderRate == null ? "—" : `${m.blunderRate}/100 moves`) +
+      chip(m.consistency, "Consistency",
+        m.accuracyStdDev == null ? "needs 2+ reviewed games" : `±${m.accuracyStdDev} accuracy swing`,
+        "") +
+      chip(dash(m.conversion), "Conversion",
+        `${m.wins || 0}W ${m.losses || 0}L ${m.draws || 0}D`,
+        m.conversion == null ? "—" : `${m.conversion}%`);
+  }
+
+  function paintLabRadarNote(m) {
+    const el = $("labRadarNote");
+    if (!m) { el.textContent = ""; return; }
+    if (!m.movesCount) {
+      el.textContent = "Behavior metrics start once reviewed games reach the Lab.";
+      return;
+    }
+    const axes = (m.radar || []).filter((a) => a.v != null).sort((a, b) => b.v - a.v);
+    const top = axes[0], low = axes[axes.length - 1];
+    let txt = `${m.movesCount} own moves analyzed across ${m.gamesCount} reviewed game(s).`;
+    if (top && low && top.axis !== low.axis) txt += ` Strongest axis: ${top.axis} (${top.v}). Weakest: ${low.axis} (${low.v}).`;
+    if (m.fastAccuracy != null && m.avgAccuracy != null) {
+      txt += ` Fast moves (=<3s): ${m.fastAccuracy}% vs ${m.avgAccuracy}% overall.`;
+    }
+    el.textContent = txt;
+  }
+
+  async function loadLabMetrics() {
+    try {
+      const m = await api("/api/perf/metrics?color=" + getLabColor());
+      paintLabRadar(m); paintLabMetricChips(m); paintLabRadarNote(m);
+    } catch (e) {
+      $("labRadar").innerHTML = "";
+      $("labMetricChips").innerHTML = `<div class="lab-empty">Behavior metrics unavailable — server still waking up.</div>`;
+      $("labRadarNote").textContent = "";
+    }
+  }
+
+  /* ---- daily workout: three drills picked from your weakest patterns ---- */
+  function labDayKey() {
+    try { return new Date().toISOString().slice(0, 10); } catch (e) { return "day"; }
+  }
+  function labPlanLoad() {
+    try {
+      const raw = JSON.parse(localStorage.getItem("crs_lab_plan") || "{}");
+      if (raw.day !== labDayKey()) return { day: labDayKey(), done: [], streak: raw.streak || 0, lastFull: raw.lastFull || "" };
+      return { day: raw.day, done: raw.done || [], streak: raw.streak || 0, lastFull: raw.lastFull || "" };
+    } catch (e) { return { day: labDayKey(), done: [], streak: 0, lastFull: "" }; }
+  }
+  function labPlanSave(p) {
+    try { localStorage.setItem("crs_lab_plan", JSON.stringify(p)); } catch (e) { /* full */ }
+  }
+  function paintLabDaily(recs) {
+    const el = $("labDailyList");
+    const meta = $("labDailyMeta");
+    const fill = $("labDayFill");
+    const note = $("labDailyNote");
+    const tasks = (recs || []).slice(0, 3);
+    if (!tasks.length) {
+      el.innerHTML = `<div class="lab-empty">No drills yet — review more games and your plan appears here.</div>`;
+      meta.textContent = ""; fill.style.width = "0%"; note.textContent = "";
+      return;
+    }
+    const p = labPlanLoad();
+    const doneCount = tasks.filter((_, i) => p.done.includes(i)).length;
+    meta.textContent = `${doneCount}/${tasks.length} done · ${p.streak} day streak`;
+    el.innerHTML = tasks.map((rec, i) => `
+      <div class="lab-day ${p.done.includes(i) ? "lit" : ""}" data-i="${i}" title="Click to mark done">
+        <span class="lab-dayCheck">&#10003;</span>
+        <span><div class="lab-day-title">${labEscape(rec.title)}</div>
+          <div class="lab-day-body">${labEscape(rec.exerciseFocus)}</div></span>
+        <span class="lab-day-streak">&#9832; ${rec.priority}</span>
+      </div>`).join("");
+    el.querySelectorAll(".lab-day").forEach((row) => {
+      row.onclick = () => {
+        const pp = labPlanLoad();
+        const i = +row.dataset.i;
+        pp.done = pp.done.includes(i) ? pp.done.filter((x) => x !== i) : pp.done.concat([i]);
+        const allDone = tasks.every((_, x) => pp.done.includes(x));
+        if (allDone && pp.lastFull !== pp.day) {
+          const yest = (function () {
+            const d = new Date(); d.setDate(d.getDate() - 1);
+            try { return d.toISOString().slice(0, 10); } catch (e) { return ""; }
+          })();
+          pp.streak = pp.lastFull === yest ? pp.streak + 1 : 1;
+          pp.lastFull = pp.day;
+        }
+        labPlanSave(pp);
+        paintLabDaily(recs);
+      };
+    });
+    fill.style.width = `${Math.round(100 * doneCount / tasks.length)}%`;
+    note.textContent = "Drills come from your top recommendations and rotate as your data changes.";
+  }
+
   function paintLabRecommendations(r) {
     const el = $("labRecList");
     const recs = r.recommendations || [];
@@ -2455,17 +2620,20 @@
   async function refreshLab() {
     try {
       await perfSyncLibrary();   // v66: Library is the source of truth - re-attach missing reviewed games first
-      const [d, w, o, r, g] = await Promise.all([
+      const [d, w, o, r, g, m] = await Promise.all([
         api("/api/perf/overall"), api("/api/perf/weaknesses"),
         api("/api/perf/openings"), api("/api/perf/recommendations"),
-        api("/api/perf/games?limit=30"),
+        api("/api/perf/games?limit=30"), api("/api/perf/metrics?color=" + getLabColor()),
       ]);
       paintLabHero(d); paintLabPhaseBars(d); paintLabWeaknesses(w); paintLabOpenings(o);
-      paintLabRecommendations(r); paintLabGames(g.games || [], g.total);
+      paintLabRecommendations(r); paintLabDaily(r.recommendations); paintLabGames(g.games || [], g.total);
+      paintLabRadar(m); paintLabMetricChips(m); paintLabRadarNote(m);
     } catch (e) {
       $("labHero").innerHTML = `<div class="lab-hero-item" style="grid-column:1/-1"><div class="lab-hero-label">Lab unavailable — is the server awake?</div></div>`;
       $("labPhaseBars").innerHTML = ""; $("labWeaknessCards").innerHTML = "";
       $("labOpeningRows").innerHTML = ""; $("labRecList").innerHTML = ""; $("labGameList").innerHTML = "";
+      $("labRadar").innerHTML = ""; $("labMetricChips").innerHTML = "";
+      $("labRadarNote").textContent = ""; $("labDailyList").innerHTML = "";
     }
   }
   async function perfSyncReviewed(res) {
@@ -2524,6 +2692,10 @@
     e.target.value = "";
   };
   $("labRefreshBtn").onclick = refreshLab;
+  document.querySelectorAll("#labColorToggle .lab-seg").forEach((b) => {
+    b.classList.toggle("active", b.dataset.color === getLabColor());
+    b.onclick = () => setLabColor(b.dataset.color);
+  });
 
   /* Lab is a full sidebar page (v66): btnLab opens it; Board button / Esc / btnLab closes it */
   let labOpen = false;
