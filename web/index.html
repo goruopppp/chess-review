@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=65">
+<link rel="stylesheet" href="css/style.css?v=66">
 </head>
 <body>
 <div class="app-shell">
@@ -27,6 +27,9 @@
       <button id="btnLive" class="side-btn" type="button" aria-label="Toggle live engine analysis"></button>
       <button id="btnFlip" class="side-btn" type="button" title="Flip board (F)" aria-label="Flip board">
         <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4v15M8 19l-3.5-3.5M8 19l3.5-3.5M16 20V5M16 5l-3.5 3.5M16 5l3.5 3.5"/></g></svg>
+      </button>
+      <button id="btnLab" class="side-btn" type="button" title="Performance Lab - performance analytics across all your games" aria-label="Performance Lab">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></g></svg>
       </button>
     </div>
     <div class="side-bottom">
@@ -189,7 +192,6 @@
       <button class="tab" data-tab="repertoire" role="tab" aria-selected="false" type="button">Repertoire</button>
       <button class="tab" data-tab="puzzle" role="tab" aria-selected="false" type="button">Puzzle</button>
       <button class="tab" data-tab="trainer" role="tab" aria-selected="false" type="button">Trainer</button>
-      <button class="tab" data-tab="lab" role="tab" aria-selected="false" type="button">Lab</button>
     </div>
 
     <div class="tab-body" id="tab-report" role="tabpanel">
@@ -420,53 +422,6 @@
       </div>
     </div>
 
-    <div class="tab-body" id="tab-lab" role="tabpanel" hidden>
-      <div class="lab-page">
-        <div class="lab-head">
-          <div class="lab-brand">
-            <span class="lab-knight" aria-hidden="true">&#9822;</span>
-            <div>
-              <h3 class="lab-title">Performance Lab</h3>
-              <p class="lab-sub">Every game you've played, turned into measurable progress.</p>
-            </div>
-          </div>
-          <div class="lab-actions">
-            <button id="labImportBtn" class="lab-btn lab-btn-primary" type="button">&#8682; Import file</button>
-            <input type="file" id="labImportFile" accept=".pgn,application/x-chess-pgn" hidden>
-            <button id="labImportPgnBtn" class="lab-btn" type="button">Paste PGN</button>
-            <button id="labRefreshBtn" class="lab-btn" type="button" title="Recompute from stored data">&#8635;</button>
-          </div>
-        </div>
-
-        <div class="lab-hero-grid" id="labHero"></div>
-
-        <div class="lab-card lab-phase-card">
-          <div class="lab-card-title"><span>Accuracy by phase</span><span class="lab-meta" id="labPhaseMeta"></span></div>
-          <div id="labPhaseBars" class="lab-phase-bars"></div>
-        </div>
-
-        <div class="lab-card">
-          <div class="lab-card-title"><span>Weakness fingerprint</span><span class="lab-meta" id="labWeaknessMeta"></span></div>
-          <div id="labWeaknessCards" class="lab-weakness-list"></div>
-        </div>
-
-        <div class="lab-card">
-          <div class="lab-card-title"><span>Opening families</span><span class="lab-meta">win rate &middot; low samples flagged</span></div>
-          <div id="labOpeningRows" class="lab-opening-list"></div>
-        </div>
-
-        <div class="lab-card">
-          <div class="lab-card-title"><span>Next — train the leak</span><span class="lab-meta">ranked by your own data</span></div>
-          <div id="labRecList" class="lab-rec-list"></div>
-        </div>
-
-        <div class="lab-card">
-          <div class="lab-card-title"><span>Imported games</span><span class="lab-meta" id="labGameMeta"></span></div>
-          <div id="labGameList" class="lab-game-list"></div>
-        </div>
-      </div>
-    </div>
-
     <div class="panel-foot">
       <button id="btnPgn" class="btn btn-sm" type="button" disabled>
         <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 0 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 0 1 1.4-1.4L11 13.6V4a1 1 0 0 1 1-1zM5 19a1 1 0 0 1 1-1h12a1 1 0 0 1 0 2H6a1 1 0 0 1-1-1z" fill="currentColor"/></svg>
@@ -475,6 +430,54 @@
     </div>
   </section>
 </main>
+
+<section class="lab-view" id="viewLab" hidden aria-label="Performance Lab">
+  <div class="lab-page">
+    <div class="lab-head">
+      <div class="lab-brand">
+        <span class="lab-knight" aria-hidden="true">&#9822;</span>
+        <div>
+          <h3 class="lab-title">Performance Lab</h3>
+          <p class="lab-sub">Every game you've played, turned into measurable progress.</p>
+        </div>
+      </div>
+      <div class="lab-actions">
+        <button id="labBackBtn" class="lab-btn" type="button" title="Back to the board (Esc)">&#8592; Board</button>
+        <button id="labImportBtn" class="lab-btn lab-btn-primary" type="button">&#8682; Import file</button>
+        <input type="file" id="labImportFile" accept=".pgn,application/x-chess-pgn" hidden>
+        <button id="labImportPgnBtn" class="lab-btn" type="button">Paste PGN</button>
+        <button id="labRefreshBtn" class="lab-btn" type="button" title="Recompute from stored data">&#8635;</button>
+      </div>
+    </div>
+
+    <div class="lab-hero-grid" id="labHero"></div>
+
+    <div class="lab-card lab-phase-card">
+      <div class="lab-card-title"><span>Accuracy by phase</span><span class="lab-meta" id="labPhaseMeta"></span></div>
+      <div id="labPhaseBars" class="lab-phase-bars"></div>
+    </div>
+
+    <div class="lab-card">
+      <div class="lab-card-title"><span>Weakness fingerprint</span><span class="lab-meta" id="labWeaknessMeta"></span></div>
+      <div id="labWeaknessCards" class="lab-weakness-list"></div>
+    </div>
+
+    <div class="lab-card">
+      <div class="lab-card-title"><span>Opening families</span><span class="lab-meta">win rate &middot; low samples flagged</span></div>
+      <div id="labOpeningRows" class="lab-opening-list"></div>
+    </div>
+
+    <div class="lab-card">
+      <div class="lab-card-title"><span>Next — train the leak</span><span class="lab-meta">ranked by your own data</span></div>
+      <div id="labRecList" class="lab-rec-list"></div>
+    </div>
+
+    <div class="lab-card">
+      <div class="lab-card-title"><span>Imported games</span><span class="lab-meta" id="labGameMeta"></span></div>
+      <div id="labGameList" class="lab-game-list"></div>
+    </div>
+  </div>
+</section>
   </div><!-- /main-area -->
 </div><!-- /app-shell -->
 
@@ -723,6 +726,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=65"></script>
+<script src="js/app.js?v=66"></script>
 </body>
 </html>
