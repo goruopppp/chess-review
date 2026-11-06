@@ -2315,7 +2315,7 @@
   const labEscape = typeof trainerEsc === "function" ? trainerEsc : ((s) =>
     String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"));
 
-  const LAB_GLYPHS = { total: "&#9822;", winrate: "&#x2655;", accuracy: "&#9822;", blunders: "&#9873;", reviewed: "&#9822;", missed: "&#8626;" };
+  const LAB_GLYPHS = { total: "&#9822;", winrate: "&#x2655;", accuracy: "&#9814;", blunders: "&#9873;", reviewed: "&#9822;", missed: "&#8626;" };
 
   function paintLabHero(d) {
     const avgAcc = (d.avgAccuracy && d.avgAccuracy.white != null && d.avgAccuracy.black != null)
@@ -2334,7 +2334,7 @@
       + `<div class="lab-hero-sub">ACPL ${d.avgACPL && d.avgACPL.white != null ? Math.round((d.avgACPL.white + d.avgACPL.black) / 2) : "—"}</div></div>`
       + `<div class="lab-hero-item"><span class="lab-hero-glyph">${LAB_GLYPHS.blunders}</span>`
       + `<div class="lab-hero-num ${(d.errorTotals.blunders || 0) > 0 ? "hot" : "ok"}">${d.errorTotals.blunders || 0}</div>`
-      + `<div class="lab-hero-label">Blunders (all games)</div>`
+      + `<div class="lab-hero-label">Blunders</div>`
       + `<div class="lab-hero-sub">${d.errorTotals.misses || 0} missed wins</div></div>`;
   }
 
@@ -2349,10 +2349,11 @@
       return;
     }
     const row = (label, val, fillCls) => {
-      const v = val != null ? Math.round(val) : 0;
+      const missing = val == null;
+      const v = missing ? 0 : Math.round(val);
       return `<div class="lab-phase-row"><span class="lab-phase-name">${label}</span>`
         + `<span class="lab-phase-track"><span class="lab-phase-fill ${fillCls}" style="width:${v}%"></span></span>`
-        + `<span class="lab-phase-val">${v || 0}</span></div>`;
+        + `<span class="lab-phase-val">${missing ? "—" : v}</span></div>`;
     };
     // navy-reference gradient lanes: green → amber → red (open → end)
     el.innerHTML = row("Opening", ps.opening, "")
@@ -2363,7 +2364,11 @@
   function paintLabWeaknesses(w) {
     const el = $("labWeaknessCards");
     const meta = $("labWeaknessMeta");
-    meta.textContent = `${w.reviewedGames || 0} reviewed game(s) · ${w.weaknesses.length} pattern${w.weaknesses.length === 1 ? "" : "s"} found`;
+    const total = w.weaknesses.length;
+    const shown = Math.min(4, total);
+    meta.textContent = shown
+      ? `${w.reviewedGames || 0} reviewed · top ${shown} of ${total} pattern${total === 1 ? "" : "s"}`
+      : "no weaknesses found";
     if (!w.weaknesses.length) {
       el.innerHTML = `<div class="lab-empty">${labEscape(w.note || "Nothing to see yet — review more games or import them to surface patterns here.")}</div>`;
       return;
@@ -2390,7 +2395,7 @@
       const decided = f.wins + f.losses + f.draws;
       const wr = decided ? Math.round(100 * f.wins / decided) : null;
       const wrCls = wr == null ? "" : wr >= 60 ? "ok" : wr >= 40 ? "mid" : "bad";
-      const confNote = f.confidence === "high" ? "" : ` · N=${f.games} ${f.confidence}`;
+      const confNote = f.confidence === "high" ? "" : ` · small sample (N=${f.games})`;
       const wPct = f.games ? Math.round(100 * f.wins / f.games) : 0;
       const dPct = f.games ? Math.round(100 * f.draws / f.games) : 0;
       const lPct = f.games ? Math.max(0, 100 - wPct - dPct) : 0;
@@ -2421,9 +2426,10 @@
       </div>`).join("");
   }
 
-  function paintLabGames(list) {
+  function paintLabGames(list, total) {
     const el = $("labGameList");
-    $("labGameMeta").textContent = `${list.length} shown (${list.length} total shown)`;
+    const tot = Number(total) || 0;
+    $("labGameMeta").textContent = tot ? `${list.length} of ${tot} shown` : "0 games";
     if (!list.length) {
       el.innerHTML = `<div class="lab-empty">No games imported yet. Use "Import file" or "Paste PGN" above — duplicates are skipped automatically.</div>`;
       return;
@@ -2455,7 +2461,7 @@
         api("/api/perf/games?limit=30"),
       ]);
       paintLabHero(d); paintLabPhaseBars(d); paintLabWeaknesses(w); paintLabOpenings(o);
-      paintLabRecommendations(r); paintLabGames(g.games || []);
+      paintLabRecommendations(r); paintLabGames(g.games || [], g.total);
     } catch (e) {
       $("labHero").innerHTML = `<div class="lab-hero-item" style="grid-column:1/-1"><div class="lab-hero-label">Lab unavailable — is the server awake?</div></div>`;
       $("labPhaseBars").innerHTML = ""; $("labWeaknessCards").innerHTML = "";
