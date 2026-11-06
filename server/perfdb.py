@@ -67,6 +67,15 @@ def _connect():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_games_result ON games(result)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_games_reviewed ON games(reviewed)")
         conn.commit()
+        # review rows whose games row is missing are pure corruption (an older
+        # attach_review left them behind); drop so analytics stay consistent
+        orphans = conn.execute(
+            "DELETE FROM reviews WHERE game_id NOT IN (SELECT id FROM games)").rowcount
+        if orphans:
+            print(f"[perfdb] removed {orphans} orphan review row(s)")
+        # FK enforcement per connection so ON DELETE CASCADE actually runs
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.commit()
         _conn = conn
     return _conn
 
@@ -325,11 +334,12 @@ def attach_review(res):
                 "id, fen, white, black, white_elo, black_elo, result, date, date_ts,"
                 "time_control, tc_bucket, opening, eco, ply_count, event, source,"
                 "reviewed, pgn_text, created_at, updated_at) "
-                "VALUES (?,?,?,NULL,NULL,?,?,?,?,?,?,?,?,?,?,'review',1,'',?,?)",
+                "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'review', 1, ?, ?, ?)",
                 (gid, fen, white_c, black_c, game.get("Result", "*"), game.get("Date", ""),
                  _date_ts(game.get("Date", "")), game.get("TimeControl", ""),
                  _tc_bucket(game.get("TimeControl", "")), game.get("opening", ""),
-                 game.get("eco", ""), len(moves), game.get("Event", ""), time.time(), time.time()))
+                 game.get("eco", ""), len(moves), game.get("Event", ""),
+                 str(res.get("pgn") or ""), time.time(), time.time()))
             conn.execute(
                 "UPDATE games SET reviewed = 1, updated_at = ?,"
                 " opening = COALESCE(NULLIF(?, ''), opening),"
@@ -392,6 +402,13 @@ def list_games(limit=100):
             " ply_count, source, reviewed FROM games"
             " ORDER BY date_ts DESC, created_at DESC LIMIT ?", (int(limit),)).fetchall()
     return [_row(None, r) for r in rows]
+
+
+def games_total():
+    """Real games count for the Lab list header ('N shown of M imported')."""
+    with _lock:
+        conn = _connect()
+        return conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
 
 
 def overall():
@@ -505,8 +522,11 @@ def games_by_id(ids):
 
 
 def delete_game(gid):
+    """Remove a game AND its review (cascade is enforced by FK pragma + explicit delete)."""
     with _lock:
         conn = _connect()
+        conn.execute("BEGIN")
+        conn.execute("DELETE FROM reviews WHERE game_id = ?", (gid,))
         cur = conn.execute("DELETE FROM games WHERE id = ?", (gid,))
         conn.commit()
     return cur.rowcount > 0
@@ -584,17 +604,11 @@ def weaknesses():
                 "count": n, "gamesCount": n,
                 "severity": "high" if n >= 4 else "medium", "confidence": conf,
                 "evidence": [r[0] for r in miss_rows[:20]],
-                "description": f"You passed up a win in {n} game(s). Look for the pattern below.",
+                "description": f"You passed up a winning chance in {n} game(s) — the Trainer stores those critical positions as exercises.",
             })
 
         # ---- rule 2: blunders while already better (>= +250 cp before the move)
-        blunder_better = aggregate(
-            "SELECT DISTINCT g.id, g.white, g.black, g.result, g.date, g.ply_count "
-            "FROM games g JOIN reviews r ON r.game_id = g.id, reviews r2 "
-            "WHERE g.reviewed = 1 AND EXISTS ("
-            "  SELECT 1 FROM json_each(CASE WHEN json_valid(r.moves_json) THEN r.moves_json ELSE '[]' END) AS mv"
-            ")") if False else []
-        # instead of json_each complexity, recompute from moves_json in python
+        # recomputed from moves_json in python (no json_each — clearer + testable)
         blunder_better_ids = []
         try:
             for row in conn.execute(
@@ -676,13 +690,18 @@ def weaknesses():
             gap = avg_other - avg
             if avg < 65 or gap >= 12:
                 conf = "high" if len(vals) >= 8 else ("medium" if len(vals) >= 4 else "low")
+                if gap >= 12:
+                    detail = f"{gap:.0f} points below your other phases"
+                elif gap < 0:
+                    detail = "your weakest phase relative to the others right now"
+                else:
+                    detail = "below your usual level in this phase"
                 findings.append({
                     "key": f"phase_{ph}", "label": f"Weak {ph}",
                     "count": len(vals), "gamesCount": len(vals),
                     "severity": "high" if avg < 55 else "medium", "confidence": conf,
                     "evidence": phase_ids[ph][:20],
-                    "description": f"{ph.capitalize()} accuracy averages {avg:.0f}%, "
-                                   f"{gap:.0f} points below your other phases.",
+                    "description": f"{ph.capitalize()} accuracy averages {avg:.0f}% — {detail}.",
                 })
 
         # ---- rule 5: conversion failure — had a position worth ≥85 win% and didn't win it
@@ -771,13 +790,22 @@ def recommendations():
                 "support": f["evidence"][:10],
                 "priority": "high" if f["severity"] == "high" else "medium",
             })
+        elif f["key"] == "conversion":
+            recs.append({
+                "title": "Cash in your winning positions",
+                "category": "Conversion",
+                "why": f"{f['count']} game(s) were clearly winning (85%+ win chance) and finished without the point.",
+                "exerciseFocus": "Open those games from your library, reload the winning position on the board, and practice converting against the engine.",
+                "support": f["evidence"][:10],
+                "priority": "high" if f["severity"] == "high" else "medium",
+            })
         elif f["key"].startswith("phase_"):
             ph = f["key"].split("_", 1)[1]
             recs.append({
                 "title": f"Strengthen your {ph}",
                 "category": f"{ph.capitalize()} play",
                 "why": f"{f['description']}",
-                "exerciseFocus": f"Use the trainer's {ph} exercises (filters by the opening of those games).",
+                "exerciseFocus": f"Open the games that drove this from your library and re-watch how the {ph} slipped.",
                 "support": f["evidence"][:10],
                 "priority": "high" if f["severity"] == "high" else "medium",
             })
@@ -803,10 +831,10 @@ def recommendations():
     recs.append({
         "title": "Build an opening repertoire map",
         "category": "Opening preparation",
-        "why": "Structured study pays compounding dividends: the openings you actually play are listed in the Openings tab.",
+        "why": "Structured study pays compounding dividends: the openings you actually play are listed in the Explorer tab.",
         "exerciseFocus": "Review your five most-played openings with the Explorer and tag your must-know lines.",
         "support": [],
-        "priority": "low" if not recs else recs[-1].get("priority", "medium"),
+        "priority": "low" if recs else "medium",
     })
     return {"reviewedGames": w.get("reviewedGames", 0), "recommendations": recs}
 
