@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=68">
+<link rel="stylesheet" href="css/style.css?v=69">
 </head>
 <body>
 <div class="app-shell">
@@ -452,6 +452,28 @@
 
     <div class="lab-hero-grid" id="labHero"></div>
 
+    <div class="lab-card">
+      <div class="lab-card-title">
+        <span>Performance radar</span>
+        <span class="lab-color-toggle" id="labColorToggle">
+          <button class="lab-seg active" data-color="white" type="button" aria-label="Analyze White side">White</button>
+          <button class="lab-seg" data-color="black" type="button" aria-label="Analyze Black side">Black</button>
+        </span>
+      </div>
+      <div class="lab-radar-wrap">
+        <svg id="labRadar" class="lab-radar" viewBox="0 0 300 240" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Your performance radar across six axes"></svg>
+        <div id="labMetricChips" class="lab-metric-chips"></div>
+      </div>
+      <p class="lab-meta" id="labRadarNote"></p>
+    </div>
+
+    <div class="lab-card">
+      <div class="lab-card-title"><span>Daily workout</span><span class="lab-meta" id="labDailyMeta"></span></div>
+      <div id="labDailyList" class="lab-daily-list"></div>
+      <div class="lab-day-bar"><div id="labDayFill" class="lab-day-fill" style="width:0%"></div></div>
+      <p class="lab-meta" id="labDailyNote"></p>
+    </div>
+
     <div class="lab-card lab-phase-card">
       <div class="lab-card-title"><span>Accuracy by phase</span><span class="lab-meta" id="labPhaseMeta"></span></div>
       <div id="labPhaseBars" class="lab-phase-bars"></div>
@@ -726,6 +748,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=68"></script>
+<script src="js/app.js?v=69"></script>
 </body>
 </html>
