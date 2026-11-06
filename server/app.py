@@ -512,6 +512,16 @@ def api_perf_games():
     return jsonify({"games": perfdb.list_games(limit), "total": perfdb.games_total()})
 
 
+@app.get("/api/perf/metrics")
+def api_perf_metrics():
+    """Behavior metrics for one side (aimchess-style stats), ?color=white|black."""
+    from server import perfdb
+    color = (request.args.get("color") or "white").strip().lower()
+    if color not in ("white", "black"):
+        color = "white"
+    return jsonify(perfdb.metrics(color))
+
+
 @app.post("/api/perf/games/delete")
 def api_perf_games_delete():
     from server import perfdb
