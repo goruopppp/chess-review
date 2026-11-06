@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=69">
+<link rel="stylesheet" href="css/style.css?v=70">
 </head>
 <body>
 <div class="app-shell">
@@ -450,7 +450,120 @@
       </div>
     </div>
 
-    <div class="lab-hero-grid" id="labHero"></div>
+    <div class="lab-tiles" id="labTiles">
+      <div class="lab-tile" data-skill="rating">
+        <div class="lab-tile-head">
+          <div class="lab-tile-name"><span class="lab-tile-ic" aria-hidden="true">&#9733;</span>Rating</div>
+          <span class="lab-delta flat">flat</span>
+        </div>
+        <svg class="lab-chart" viewBox="0 0 220 76" preserveAspectRatio="none" role="img" aria-label="Per-game accuracy trend"></svg>
+        <div class="lab-legend"><span class="lg-you">You</span><span class="lg-avg">avg</span><span class="lg-target">target</span></div>
+        <div class="lab-tile-foot">
+          <button class="lab-btn-s" data-act="details" type="button">Details</button>
+          <button class="lab-btn-s primary" data-act="practice" type="button">Practice</button>
+        </div>
+        <div class="lab-tile-detail" hidden></div>
+      </div>
+
+      <div class="lab-tile" data-skill="games">
+        <div class="lab-tile-head">
+          <div class="lab-tile-name"><span class="lab-tile-ic" aria-hidden="true">&#9823;</span>Games</div>
+          <span class="lab-delta" style="display:none"></span>
+        </div>
+        <div class="lab-donut-wrap">
+          <svg class="lab-donut" viewBox="0 0 104 104" role="img" aria-label="Wins, draws and losses split"></svg>
+          <div class="lab-donut-side"></div>
+        </div>
+        <div class="lab-tile-foot">
+          <button class="lab-btn-s" data-act="details" type="button" style="grid-column: 1 / -1;">Details</button>
+        </div>
+        <div class="lab-tile-detail" hidden></div>
+      </div>
+
+      <div class="lab-tile" data-skill="opening">
+        <div class="lab-tile-head">
+          <div class="lab-tile-name"><span class="lab-tile-ic" aria-hidden="true">&#9816;</span>Opening</div>
+          <span class="lab-delta flat">flat</span>
+        </div>
+        <svg class="lab-chart" viewBox="0 0 220 76" preserveAspectRatio="none" role="img" aria-label="Per-game opening accuracy trend"></svg>
+        <div class="lab-legend"><span class="lg-you">You</span><span class="lg-avg">avg</span><span class="lg-target">target</span></div>
+        <div class="lab-tile-foot">
+          <button class="lab-btn-s" data-act="details" type="button">Details</button>
+          <button class="lab-btn-s primary" data-act="practice" type="button">Practice</button>
+        </div>
+        <div class="lab-tile-detail" hidden></div>
+      </div>
+
+      <div class="lab-tile" data-skill="middlegame">
+        <div class="lab-tile-head">
+          <div class="lab-tile-name"><span class="lab-tile-ic" aria-hidden="true">&#9824;</span>Middlegame</div>
+          <span class="lab-delta flat">flat</span>
+        </div>
+        <svg class="lab-chart" viewBox="0 0 220 76" preserveAspectRatio="none" role="img" aria-label="Per-game middlegame accuracy trend"></svg>
+        <div class="lab-legend"><span class="lg-you">You</span><span class="lg-avg">avg</span><span class="lg-target">target</span></div>
+        <div class="lab-tile-foot">
+          <button class="lab-btn-s" data-act="details" type="button">Details</button>
+          <button class="lab-btn-s primary" data-act="practice" type="button">Practice</button>
+        </div>
+        <div class="lab-tile-detail" hidden></div>
+      </div>
+
+      <div class="lab-tile" data-skill="endgame">
+        <div class="lab-tile-head">
+          <div class="lab-tile-name"><span class="lab-tile-ic" aria-hidden="true">&#9820;</span>Endgame</div>
+          <span class="lab-delta flat">flat</span>
+        </div>
+        <svg class="lab-chart" viewBox="0 0 220 76" preserveAspectRatio="none" role="img" aria-label="Per-game endgame accuracy trend"></svg>
+        <div class="lab-legend"><span class="lg-you">You</span><span class="lg-avg">avg</span><span class="lg-target">target</span></div>
+        <div class="lab-tile-foot">
+          <button class="lab-btn-s" data-act="details" type="button">Details</button>
+          <button class="lab-btn-s primary" data-act="practice" type="button">Practice</button>
+        </div>
+        <div class="lab-tile-detail" hidden></div>
+      </div>
+
+      <div class="lab-tile" data-skill="tactics">
+        <div class="lab-tile-head">
+          <div class="lab-tile-name"><span class="lab-tile-ic" aria-hidden="true">&#9889;</span>Tactics</div>
+          <span class="lab-delta flat">flat</span>
+        </div>
+        <svg class="lab-chart" viewBox="0 0 220 76" preserveAspectRatio="none" role="img" aria-label="Per-game tactic sharpness trend"></svg>
+        <div class="lab-legend"><span class="lg-you">You</span><span class="lg-avg">avg</span><span class="lg-target">target</span></div>
+        <div class="lab-tile-foot">
+          <button class="lab-btn-s" data-act="details" type="button">Details</button>
+          <button class="lab-btn-s primary" data-act="practice" type="button">Practice</button>
+        </div>
+        <div class="lab-tile-detail" hidden></div>
+      </div>
+
+      <div class="lab-tile" data-skill="time_mgmt">
+        <div class="lab-tile-head">
+          <div class="lab-tile-name"><span class="lab-tile-ic" aria-hidden="true">&#9201;</span>Time management</div>
+          <span class="lab-delta flat">flat</span>
+        </div>
+        <svg class="lab-chart" viewBox="0 0 220 76" preserveAspectRatio="none" role="img" aria-label="Per-game tempo trend"></svg>
+        <div class="lab-legend"><span class="lg-you">You</span><span class="lg-avg">avg</span><span class="lg-target">target</span></div>
+        <div class="lab-tile-foot">
+          <button class="lab-btn-s" data-act="details" type="button">Details</button>
+          <button class="lab-btn-s primary" data-act="practice" type="button">Practice</button>
+        </div>
+        <div class="lab-tile-detail" hidden></div>
+      </div>
+
+      <div class="lab-tile" data-skill="resourcefulness">
+        <div class="lab-tile-head">
+          <div class="lab-tile-name"><span class="lab-tile-ic" aria-hidden="true">&#9891;</span>Resourcefulness</div>
+          <span class="lab-delta flat">flat</span>
+        </div>
+        <svg class="lab-chart" viewBox="0 0 220 76" preserveAspectRatio="none" role="img" aria-label="Per-game conversion of big chances"></svg>
+        <div class="lab-legend"><span class="lg-you">You</span><span class="lg-avg">avg</span><span class="lg-target">target</span></div>
+        <div class="lab-tile-foot">
+          <button class="lab-btn-s" data-act="details" type="button">Details</button>
+          <button class="lab-btn-s primary" data-act="practice" type="button">Practice</button>
+        </div>
+        <div class="lab-tile-detail" hidden></div>
+      </div>
+    </div>
 
     <div class="lab-card">
       <div class="lab-card-title">
@@ -472,11 +585,6 @@
       <div id="labDailyList" class="lab-daily-list"></div>
       <div class="lab-day-bar"><div id="labDayFill" class="lab-day-fill" style="width:0%"></div></div>
       <p class="lab-meta" id="labDailyNote"></p>
-    </div>
-
-    <div class="lab-card lab-phase-card">
-      <div class="lab-card-title"><span>Accuracy by phase</span><span class="lab-meta" id="labPhaseMeta"></span></div>
-      <div id="labPhaseBars" class="lab-phase-bars"></div>
     </div>
 
     <div class="lab-card">
@@ -748,6 +856,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=69"></script>
+<script src="js/app.js?v=70"></script>
 </body>
 </html>
