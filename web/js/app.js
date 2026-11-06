@@ -2448,6 +2448,7 @@
 
   async function refreshLab() {
     try {
+      await perfSyncLibrary();   // v66: Library is the source of truth - re-attach missing reviewed games first
       const [d, w, o, r, g] = await Promise.all([
         api("/api/perf/overall"), api("/api/perf/weaknesses"),
         api("/api/perf/openings"), api("/api/perf/recommendations"),
@@ -2463,6 +2464,21 @@
   }
   async function perfSyncReviewed(res) {
     try { await post("/api/perf/import_review", { review: res }); } catch (e) { /* best effort */ }
+  }
+
+  /* v66: the Lab always uses every already-reviewed game the browser holds (library is
+     source of truth). Container wipes erase the server DB, so instead of a one-shot flag
+     we re-attach the whole library whenever the server shows fewer reviewed games than
+     the library holds. attach_review upserts by id / position+players, so re-sending
+     known reviews is idempotent and cheap. */
+  async function perfSyncLibrary() {
+    const lib = libLoad();
+    if (!lib.length) return 0;
+    let d = null;
+    try { d = await api("/api/perf/overall"); } catch (e) { return 0; }
+    if (((d && d.reviewedGames) || 0) >= lib.length) return 0;
+    await Promise.all(lib.filter((g) => g && g.review).map((g) => perfSyncReviewed(g.review)));
+    return lib.length;
   }
   async function perfImportBulk(text) {
     try {
@@ -3977,13 +3993,10 @@
         renderBoard();
       }
       repRestoreLast(); // reopen the last built/opened repertoire (tab + preview)
-      // one-shot: every locally-saved review is imported into the Lab at boot
-      try {
-        if (!localStorage.getItem("crs_perf_synced_v64")) {
-          localStorage.setItem("crs_perf_synced_v64", "1");
-          Promise.all(libLoad().map((g) => perfSyncReviewed(g.review))).catch(() => {});
-        }
-      } catch (e) { /* private mode */ }
+      // v66: keep the Lab fed with every locally-saved review at boot
+      // (was a one-shot v64 flag; now a self-healing count-diff sync so container
+      // wipes on Render re-attach the whole library automatically)
+      perfSyncLibrary().catch(() => {});
       loadSamples();
       maybeReattachJob(); // a review that was running at refresh keeps going
     });
