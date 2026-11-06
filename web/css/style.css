@@ -1121,8 +1121,12 @@ body { -webkit-tap-highlight-color: transparent; }
 .tr-done-stat span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
 
 /* ---------- Performance Lab — "diagnostic rig" navy (v65) ---------- */
-#tab-lab { padding: 0; background: #161a2b; overflow-y: auto; }
-.lab-page { padding: 12px 12px 14px; display: flex; flex-direction: column; gap: 12px; }
+.side-btn.lab-on { color: #f5a524; background: rgba(245, 165, 36, .12); }
+.side-btn.lab-on:hover { color: #f5a524; }
+#viewLab { flex: 1; min-width: 0; width: 100%; background: #161a2b; overflow-y: auto; }
+.main-area.lab-open .topbar { display: none; }
+.main-area.lab-open main.layout { display: none; }
+.lab-page { max-width: 700px; margin: 0 auto; padding: 12px 14px 18px; display: flex; flex-direction: column; gap: 12px; width: 100%; }
 .lab-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .lab-brand { display: flex; align-items: center; gap: 10px; }
 .lab-knight { font-size: 22px; color: #f5a524; text-shadow: 0 0 12px rgba(245, 165, 36, 0.25); }
