@@ -1222,3 +1222,53 @@ body { -webkit-tap-highlight-color: transparent; }
 .lab-empty { padding: 18px 14px; text-align: center; color: #8e93af; font-size: 11px; border: 1px dashed #2c3148; border-radius: 9px; }
 .lab-import-text { width: 100%; height: 220px; font-family: ui-monospace, monospace; font-size: 11.5px; resize: vertical; background: #1e2234; color: #e5e1cf; border: 1px solid #2c3148; }
 .lab-import-error { color: #f87171; font-size: 11px; }
+
+/* ---------- aimchess-style behavior layer (v69) ---------- */
+.lab-color-toggle { display: inline-flex; gap: 3px; }
+.lab-seg { background: transparent; color: #6d728c; border: 1px solid #2c3148; border-radius: 5px; padding: 2px 8px; font-size: 9px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; cursor: pointer; }
+.lab-seg:hover { color: #c7c9b8; }
+.lab-seg.active { background: #232740; color: #f5a524; border-color: #3d4468; }
+
+.lab-radar-wrap { display: grid; grid-template-columns: 220px 1fr; gap: 12px; align-items: start; }
+.lab-radar { width: 100%; height: auto; }
+.lab-radar polygon.lab-radar-shape { fill: rgba(245, 165, 36, 0.16); stroke: #f5a524; stroke-width: 1.6; }
+.lab-radar polygon.lab-radar-grid { fill: none; stroke: #2c3148; stroke-width: 1; }
+.lab-radar line.lab-radar-spoke { stroke: #2c3148; stroke-width: 1; }
+.lab-radar text.lab-radar-label { fill: #8e93af; font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
+.lab-radar text.lab-radar-val { fill: #f4f1e6; font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.lab-radar circle.lab-radar-dot { fill: #f5a524; }
+.lab-radar circle.lab-radar-dot.dim { fill: #3a3f5e; }
+
+.lab-metric-chips { display: flex; flex-direction: column; gap: 6px; }
+.lab-mchip { display: grid; grid-template-columns: 34px 1fr 46px; gap: 9px; align-items: center; background: #232740; border: 1px solid #2c3148; border-radius: 8px; padding: 6px 9px; }
+.lab-mchip:hover { border-color: #3d4468; }
+.lab-mchip-num { font-size: 16px; font-weight: 800; color: #f4f1e6; font-variant-numeric: tabular-nums; line-height: 1; }
+.lab-mchip-num.ok { color: #86efac; }
+.lab-mchip-num.mid { color: #fcd34d; }
+.lab-mchip-num.bad { color: #f87171; }
+.lab-mchip-name { font-size: 10.5px; font-weight: 700; color: #c7c9b8; }
+.lab-mchip-sub { font-size: 8.5px; color: #8e93af; margin-top: 2px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lab-mchip-track { height: 4px; background: #1e2234; border-radius: 2px; overflow: hidden; margin-top: 4px; }
+.lab-mchip-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, #4ade80, #a3e635); }
+.lab-mchip-fill.mid { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.lab-mchip-fill.bad { background: linear-gradient(90deg, #fb923c, #f87171); }
+.lab-mchip-val { font-size: 10px; color: #8e93af; text-align: right; font-variant-numeric: tabular-nums; }
+
+.lab-radar-note { margin: 8px 0 0; }
+
+.lab-daily-list { display: flex; flex-direction: column; gap: 5px; }
+.lab-day { display: grid; grid-template-columns: 18px 1fr auto; gap: 9px; align-items: center; background: #232740; border: 1px solid #2c3148; border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+.lab-day:hover { border-color: #3d4468; }
+.lab-day.lit { border-color: rgba(74, 222, 128, .4); }
+.lab-dayCheck { width: 15px; height: 15px; border-radius: 4px; border: 1.5px solid #3d4468; display: inline-flex; align-items: center; justify-content: center; color: transparent; font-size: 11px; line-height: 1; }
+.lab-day.lit .lab-dayCheck { background: rgba(74, 222, 128, .18); border-color: #4ade80; color: #86efac; }
+.lab-day-title { font-size: 11px; font-weight: 700; color: #e5e1cf; }
+.lab-day-body { font-size: 9.5px; color: #8e93af; margin-top: 1px; }
+.lab-day-streak { font-size: 9px; font-weight: 800; color: #f5a524; letter-spacing: .4px; white-space: nowrap; }
+.lab-day-bar { height: 5px; background: #1e2234; border-radius: 3px; overflow: hidden; margin-top: 8px; }
+.lab-day-fill { height: 100%; background: linear-gradient(90deg, #4ade80, #a3e635); transition: width .35s ease; border-radius: 3px; }
+
+@media (max-width: 720px) {
+  .lab-radar-wrap { grid-template-columns: 1fr; }
+  .lab-radar { max-width: 240px; margin: 0 auto; }
+}
