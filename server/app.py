@@ -509,7 +509,7 @@ def api_perf_timeline():
 def api_perf_games():
     from server import perfdb
     limit = max(1, min(500, int(request.args.get("limit") or 100)))
-    return jsonify({"games": perfdb.list_games(limit)})
+    return jsonify({"games": perfdb.list_games(limit), "total": perfdb.games_total()})
 
 
 @app.post("/api/perf/games/delete")
