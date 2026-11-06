@@ -411,6 +411,183 @@ def games_total():
         return conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
 
 
+# ---------------------------------------------------------------- aimchess-style behavior metrics
+# All scores are deterministic maps defined here (nothing empirical/fabricated):
+#   speed        = avg seconds/move  (4s -> 100, 30s -> 0, linear)
+#   time_mgmt    = bell around the 8-12 s sweet spot (<8 s impulsive, >12 s slow)
+#   aggression   = (captures + checks) / own moves   (8% -> 0, 40% -> 100)
+#   blunderless  = blunders per 100 own moves        (0 -> 100, 5 -> 0)
+#   consistency  = stddev of per-game accuracy       (6% -> 100, 20% -> 0)
+# metrics() reads stored moves_json (per-move san/clock/timeSpent/class/accuracy),
+# which attach_review already persists for every reviewed game.
+
+
+def _speed_score(tpm):
+    if tpm is None:
+        return None
+    return max(0, min(100, round(100 - (tpm - 4) * (100 / 26))))
+
+
+def _time_mgmt_score(tpm):
+    if tpm is None:
+        return None
+    if tpm < 8:
+        return round(max(0.0, 100 - (8 - tpm) * 9))
+    if tpm <= 12:
+        return 100
+    return round(max(0.0, 100 - (tpm - 12) * 4.5))
+
+
+def _aggression_score(share):
+    if share is None:
+        return None
+    return max(0, min(100, round((share - 0.08) / 0.32 * 100)))
+
+
+def _blunderless_score(rate_per_100):
+    if rate_per_100 is None:
+        return None
+    return max(0, min(100, round(100 - rate_per_100 * 20)))
+
+
+def _consistency_score(sd):
+    if sd is None:
+        return None
+    return max(0, min(100, round(100 - (sd - 6) * (100 / 14))))
+
+
+def metrics(color="white"):
+    """Per-side behavior metrics over all reviewed games (aimchess-style stats)."""
+    me = "white" if (color or "white").lower() != "black" else "black"
+    opp = "black" if me == "white" else "white"
+    cap_rng = {"captures": 0, "checks": 0, "moves": 0, "blunders": 0,
+               "mistakes": 0, "fast": 0, "fastAccSum": 0.0, "accSum": 0.0,
+               "accN": 0, "tpmSum": 0.0, "tpmN": 0, "maxClockHigh": 0, "clockMoves": 0}
+    acc_values = []
+    clock_moves_total = 0
+    games_count = 0
+    need_clock_total = 0   # games whose moves carry ANY clock info
+    with _lock:
+        conn = _connect()
+        rows = conn.execute(
+            "SELECT g.result, r.moves_json, r.white_acc, r.black_acc FROM games g"
+            " JOIN reviews r ON r.game_id = g.id").fetchall()
+    for result, mvj, wacc, bacc in rows:
+        games_count += 1
+        try:
+            mvs = json.loads(mvj or "[]")
+        except Exception:
+            mvs = []
+        if not mvs:
+            continue
+        own = [m for m in mvs if (m.get("color") or opp) == me]
+        if own:
+            acc_values.append(wacc if me == "white" else bacc)
+        has_clock = any(m.get("timeSpent") is not None for m in own)
+        if has_clock:
+            need_clock_total += 1
+        for m in own:
+            cap_rng["moves"] += 1
+            san = (m.get("san") or "").lower()
+            if "x" in san:
+                cap_rng["captures"] += 1
+            if "+" in san or "#" in san:
+                cap_rng["checks"] += 1
+            cls = m.get("class")
+            if cls == "blunder":
+                cap_rng["blunders"] += 1
+            elif cls == "mistake":
+                cap_rng["mistakes"] += 1
+            acc = m.get("accuracy")
+            if isinstance(acc, (int, float)):
+                cap_rng["accN"] += 1
+                cap_rng["accSum"] += acc
+                ts = m.get("timeSpent")
+                if ts is not None:
+                    clock_moves_total += 1
+                if ts is not None and ts <= 3:
+                    cap_rng["fast"] += 1
+                    cap_rng["fastAccSum"] += acc
+            ts_b = m.get("timeSpent")
+            if ts_b is not None:
+                cap_rng["tpmN"] += 1
+                cap_rng["tpmSum"] += ts_b
+    wins = sum(1 for result, _mvj, _w, _b in rows
+               if result == ("1-0" if me == "white" else "0-1"))
+    losses = sum(1 for result, _mvj, _w, _b in rows
+                 if result == ("0-1" if me == "white" else "1-0"))
+    draws = games_count - wins - losses
+    decided = wins + losses + draws
+    n = cap_rng["moves"]
+    moves_total = max(n, clock_moves_total)
+    attack_share = (cap_rng["captures"] + cap_rng["checks"]) / n if n else None
+    blunder_rate = (cap_rng["blunders"] / n * 100) if n else None
+    avg_acc = cap_rng["accSum"] / cap_rng["accN"] if cap_rng["accN"] else None
+    fast_acc = cap_rng["fastAccSum"] / cap_rng["fast"] if cap_rng["fast"] else None
+    tpm = cap_rng["tpmSum"] / cap_rng["tpmN"] if cap_rng["tpmN"] else None
+    sd = None
+    if len(acc_values) >= 2:
+        avgs = [a for a in acc_values if a is not None]
+        if len(avgs) >= 2:
+            mu = sum(avgs) / len(avgs)
+            sd = (sum((a - mu) ** 2 for a in avgs) / len(avgs)) ** 0.5
+    phase_acc = {"opening": [], "middlegame": [], "endgame": []}
+    phase = None
+    with _lock:
+        conn = _connect()
+        p_rows = conn.execute("SELECT phase_json FROM reviews").fetchall()
+    for (pj,) in p_rows:
+        try:
+            d = json.loads(pj or "{}")
+        except Exception:
+            continue
+        side = d.get(me) or {}
+        for ph in phase_acc:
+            a = (side.get(ph) or {}).get("accuracy")
+            if isinstance(a, (int, float)):
+                phase_acc[ph].append(a)
+    opening_acc = round(sum(phase_acc["opening"]) / len(phase_acc["opening"]), 1) \
+        if phase_acc["opening"] else None
+    radar = [{"axis": "Accuracy", "v": max(0, min(100, round(avg_acc))) if avg_acc is not None else None},
+             {"axis": "Opening", "v": max(0, min(100, round(opening_acc))) if opening_acc is not None else None},
+             {"axis": "Speed", "v": _speed_score(tpm)},
+             {"axis": "Aggression", "v": _aggression_score(attack_share)},
+             {"axis": "Time mgmt", "v": _time_mgmt_score(tpm)},
+             {"axis": "Consistency", "v": _consistency_score(sd)}]
+    axes_have_data = [x for x in radar if x["v"] is not None]
+    win_rate = round(100 * wins / decided, 1) if decided else None
+    return {
+        "color": me,
+        "gamesCount": games_count,
+        "movesCount": n,
+        "wins": wins, "losses": losses, "draws": draws,
+        "winRate": win_rate,
+        "avgAccuracy": round(avg_acc, 1) if avg_acc is not None else None,
+        "acpl": None,
+        "tpm": round(tpm, 1) if tpm is not None else None,
+        "speed": _speed_score(tpm),
+        "timeMgmt": _time_mgmt_score(tpm),
+        "captureCount": cap_rng["captures"],
+        "checkCount": cap_rng["checks"],
+        "attackShare": round(attack_share * 100, 1) if attack_share is not None else None,
+        "aggression": _aggression_score(attack_share),
+        "blunders": cap_rng["blunders"],
+        "mistakes": cap_rng["mistakes"],
+        "blunderRate": round(blunder_rate, 1) if blunder_rate is not None else None,
+        "blunderless": _blunderless_score(blunder_rate),
+        "fastMoves": cap_rng["fast"],
+        "fastAccuracy": round(fast_acc, 1) if fast_acc is not None else None,
+        "accuracyStdDev": round(sd, 1) if sd is not None else None,
+        "consistency": _consistency_score(sd),
+        "openingAccuracy": opening_acc,
+        "accuracyN": cap_rng["accN"],
+        "clockGames": need_clock_total,
+        "conversion": win_rate,
+        "radar": radar,
+        "note": None if axes_have_data else "No scored moves yet — review games to unlock behavior metrics.",
+    }
+
+
 def overall():
     with _lock:
         conn = _connect()
