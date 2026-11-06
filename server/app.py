@@ -522,6 +522,16 @@ def api_perf_metrics():
     return jsonify(perfdb.metrics(color))
 
 
+@app.get("/api/perf/series")
+def api_perf_series():
+    """Per-game skill series for the Lab tiles, ?color=white|black."""
+    from server import perfdb
+    color = (request.args.get("color") or "white").strip().lower()
+    if color not in ("white", "black"):
+        color = "white"
+    return jsonify(perfdb.skill_series(color))
+
+
 @app.post("/api/perf/games/delete")
 def api_perf_games_delete():
     from server import perfdb
