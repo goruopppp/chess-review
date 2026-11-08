@@ -1379,7 +1379,13 @@ body { -webkit-tap-highlight-color: transparent; }
 @media (max-width: 980px) {
   /* v77: the strip holds brand + 7 nav icons + 9 tools + collapse/theme/settings;
      wrap instead of clipping the last buttons off the right edge */
-  .sidebar { overflow: visible; flex-wrap: wrap; }
+  .sidebar { overflow: visible; flex-wrap: wrap;
+    padding-top: max(4px, env(safe-area-inset-top, 0px));
+    padding-left: max(8px, env(safe-area-inset-left, 0px));
+    padding-right: max(8px, env(safe-area-inset-right, 0px)); }
+  .layout { padding-left: max(10px, env(safe-area-inset-left, 0px));
+    padding-right: max(10px, env(safe-area-inset-right, 0px));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
   .side-nav { flex-direction: row; gap: 2px; flex-wrap: wrap; }
   .side-nav-title { display: none; }
   .side-nav-btn { padding: 8px 6px; }
@@ -1396,6 +1402,18 @@ body { -webkit-tap-highlight-color: transparent; }
   .ov-page { padding: 12px 12px 22px; }
   .side-nav-btn { padding: 8px 4px; }
   .side-btn { width: 32px; height: 32px; }
+  /* iOS auto-zooms the page on focus when a field's font is <16px */
+  .select, .form-control,
+  input[type="text"], input[type="number"], input[type="search"], textarea { font-size: 16px; }
+  /* leaner brand line on phones; tighter modal that clears dynamic browser chrome */
+  .side-brand .brand-t { font-size: 11px; }
+  .side-brand .brand-t small { display: none; }
+  .modal { max-height: 92vh; max-height: 96dvh; }
+}
+@media (max-width: 480px) {
+  .side-btn { width: 30px; height: 30px; }
+  .side-nav-btn { padding: 7px 3px; }
+  .side-actions, .side-bottom { gap: 1px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ov-bar-fill, .sidebar { transition: none; }
