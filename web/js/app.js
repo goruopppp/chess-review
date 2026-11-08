@@ -3105,7 +3105,10 @@
     navFocus = "openings";
     applyOverview(false);
     showLab(true);   // the Lab holds your real opening-families table
-    setTimeout(() => scrollToEl($("labOpeningCard")), 60);
+    const land = () => scrollToEl($("labOpeningCard"));
+    setTimeout(land, 60);     // first landing (async paints above may still shift it)
+    setTimeout(land, 650);    // re-land after tile paint settles
+    setTimeout(land, 1250);   // re-land after slow endpoints (cold DB) settle
   };
   $("btnWeakNav").onclick = () => {
     navFocus = "overview";
@@ -3117,7 +3120,10 @@
     applyOverview(false);
     showLab(false);
     switchTab("trainer");   // the SM-2 mistake-trainer dashboard is the training surface
-    setTimeout(() => scrollToEl($("tab-trainer")), 60);
+    const land = () => scrollToEl($("tab-trainer"));
+    setTimeout(land, 60);     // first landing (dashboard may paint after)
+    setTimeout(land, 650);    // re-land after fetch settles
+    setTimeout(land, 1250);   // re-land after slow endpoints (cold DB) settle
   };
   document.querySelectorAll("#ovColorToggle .lab-seg").forEach((b) => {
     b.classList.toggle("active", b.dataset.color === getLabColor());
