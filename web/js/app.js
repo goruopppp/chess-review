@@ -1472,6 +1472,8 @@
   }
 
   /* ---------------- tabs ---------------- */
+  /* v74: which sidebar destination the user is on - overview | openings | lab | train | review */
+  let navFocus = "review";
   function switchTab(name) {
     state.activeTab = name;
     document.querySelectorAll(".review-col > .tabs .tab").forEach((t) => {
@@ -1484,6 +1486,7 @@
     if (name === "explorer") renderExplorer();
     if (name === "puzzle" && !state.puzzle) pzNew();
     if (name === "trainer") refreshTrainer();
+    syncNav();
   }
 
   /* ---------------- opening explorer ---------------- */
@@ -2863,10 +2866,11 @@
     if (labOpen && ovOpenState) applyOverview(false);   // v71: pages are mutually exclusive
     syncNav();
   }
-  $("btnLab").onclick = () => showLab(!labOpen);
-  $("labBackBtn").onclick = () => showLab(false);
+  $("btnLab").onclick = () => { navFocus = "lab"; showLab(!labOpen); };
+  $("labBackBtn").onclick = () => { navFocus = "review"; showLab(false); };
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !document.querySelector(".modal-backdrop:not([hidden])")) {
+      if (labOpen || ovOpenState) navFocus = "review";
       if (labOpen) showLab(false);
       else if (ovOpenState) applyOverview(false);
     }
@@ -2892,9 +2896,12 @@
     const onOverview = ovOpenState && apiDist && !apiDist.hidden;
     const labEl = document.getElementById("viewLab");
     const onLab = labOpen && labEl && !labEl.hidden;
-    const els = { overview: $("btnOverview"), lab: $("btnLabNav"), review: $("btnReviewNav") };
+    const els = { overview: $("btnOverview"), lab: $("btnLabNav"), openings: $("btnOpeningsNav"), train: $("btnTrainNav"), review: $("btnReviewNav") };
     Object.values(els).forEach((b) => b && b.classList.remove("active"));
-    const k = onOverview ? "overview" : onLab ? "lab" : "review";
+    const k = onOverview ? "overview"
+      : onLab ? (navFocus === "openings" ? "openings" : "lab")
+        : (navFocus === "train" && state.activeTab === "trainer") ? "train"
+          : "review";
     if (els[k]) els[k].classList.add("active");
   }
 
@@ -3076,19 +3083,31 @@
     refreshOverview();
   }
 
-  /* ---- v71 sidebar destinations: every link opens an existing surface ---- */
-  $("btnOverview").onclick = () => applyOverview(!ovOpenState);
-  $("ovBackBtn").onclick = () => applyOverview(false);
-  $("btnReviewNav").onclick = () => { applyOverview(false); showLab(false); };
-  $("btnHistoryNav").onclick = () => { applyOverview(false); renderLibrary(); $("modalLibrary").hidden = false; };
-  $("btnLabNav").onclick = () => { applyOverview(false); showLab(true); };
-  $("btnOpeningsNav").onclick = () => { applyOverview(false); showLab(false); switchTab("explorer"); };
+  /* ---- v71/v74 sidebar destinations: every link opens an existing surface ---- */
+  $("btnOverview").onclick = () => { navFocus = "overview"; applyOverview(!ovOpenState); };
+  $("ovBackBtn").onclick = () => { navFocus = "review"; applyOverview(false); };
+  $("btnReviewNav").onclick = () => { navFocus = "review"; applyOverview(false); showLab(false); };
+  $("btnHistoryNav").onclick = () => { navFocus = "review"; applyOverview(false); renderLibrary(); $("modalLibrary").hidden = false; };
+  $("btnLabNav").onclick = () => { navFocus = "lab"; applyOverview(false); showLab(true); };
+  $("btnOpeningsNav").onclick = () => {
+    navFocus = "openings";
+    applyOverview(false);
+    showLab(true);   // the Lab holds your real opening-families table
+    setTimeout(() => { const c = $("labOpeningCard"); if (c) c.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
+  };
   $("btnWeakNav").onclick = () => {
+    navFocus = "overview";
     if (!ovOpenState) applyOverview(true);
     const c = $("ovWeakCard");
     if (c && !c.hidden) c.scrollIntoView({ behavior: "smooth", block: "start" });
   };
-  $("btnTrainNav").onclick = () => { applyOverview(false); showLab(false); switchTab("trainer"); };
+  $("btnTrainNav").onclick = () => {
+    navFocus = "train";
+    applyOverview(false);
+    showLab(false);
+    switchTab("trainer");   // the SM-2 mistake-trainer dashboard is the training surface
+    setTimeout(() => { const b = $("tab-trainer"); if (b) b.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
+  };
   document.querySelectorAll("#ovColorToggle .lab-seg").forEach((b) => {
     b.classList.toggle("active", b.dataset.color === getLabColor());
     b.onclick = () => setOvColor(b.dataset.color);
