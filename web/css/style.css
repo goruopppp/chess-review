@@ -1418,3 +1418,28 @@ body { -webkit-tap-highlight-color: transparent; }
 @media (prefers-reduced-motion: reduce) {
   .ov-bar-fill, .sidebar { transition: none; }
 }
+
+/* ---------- v79: desktop toolbar can sit across the top (Settings > Toolbar position) ---------- */
+/* mirrors the <=980px strip, but only when body.toolbar-top is set on a real desktop viewport */
+@media (min-width: 981px) {
+  body.toolbar-top .app-shell { flex-direction: column; }
+  body.toolbar-top .sidebar {
+    position: sticky; top: 0; z-index: 60;
+    width: 100%; height: auto; flex: 0 0 auto; align-self: stretch;
+    flex-direction: row; justify-content: space-between; align-items: center; gap: 6px;
+    padding: 4px 12px 6px;
+    border-right: none; border-bottom: 1px solid var(--border);
+    overflow: visible; flex-wrap: wrap;
+  }
+  body.toolbar-top .side-brand { margin: 0 8px 0 0; }
+  body.toolbar-top .side-sep { width: 1px; height: 24px; margin: 0 4px; }
+  body.toolbar-top .side-nav { flex-direction: row; flex-wrap: wrap; gap: 2px; }
+  body.toolbar-top .side-nav-btn { padding: 8px 9px; }
+  body.toolbar-top .side-actions,
+  body.toolbar-top .side-bottom { flex-direction: row; margin: 0; gap: 2px; flex-wrap: wrap; }
+  body.toolbar-top .side-bottom { margin-top: 0; }
+  body.toolbar-top .topbar { position: static; }   /* the sticky strip owns the new top */
+  /* collapse in top mode condenses the strip: labels/brand text hide via the base
+     body.side-collapsed rules; the strip just stops pretending to be a 56px column */
+  body.toolbar-top.side-collapsed .sidebar { width: 100%; flex-basis: auto; padding: 4px 12px 6px; }
+}
