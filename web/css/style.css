@@ -1456,21 +1456,24 @@ body { -webkit-tap-highlight-color: transparent; }
 /* compress the rail so it usually fits without scrolling at all */
 @media (min-width: 981px) and (max-height: 900px) {
   .sidebar { padding: 8px 10px; gap: 4px; }
-  .side-brand { height: 36px; margin: 0 0 2px; }
-  .side-nav-title { padding: 4px 10px 2px; }
-  .side-nav-btn { padding: 5px 10px; }
-  .side-btn { width: 36px; height: 36px; }
+  .side-brand { height: 34px; margin: 0 0 2px; }
+  .side-nav-title { padding: 3px 10px 1px; }
+  .side-nav-btn { padding: 4px 10px; }
+  .side-btn { width: 32px; height: 32px; }
+  .side-btn .ic { width: 17px; height: 17px; }
   .side-actions, .side-bottom { gap: 1px; }
 }
 @media (min-width: 981px) and (max-height: 700px) {
-  /* very short windows: icon-only rail, like the collapsed state */
-  .sidebar { padding: 6px 10px; }
-  .side-brand { height: 28px; margin: 0 0 2px; }
+  /* very short windows: auto-compact into the collapsed-style narrow icon rail
+     (56px, like pressing the collapse button) instead of leaving cutoff-centered icons */
+  .sidebar { width: 56px; flex-basis: 56px; padding: 6px 8px; }
+  .side-brand { justify-content: center; padding: 0; gap: 0; height: 28px; margin: 0 0 2px; }
   .side-brand .brand-t,
   .side-nav-title,
   .side-nav-btn .lbl { display: none; }
-  .side-nav-btn { padding: 4px; justify-content: center; }
+  .side-nav-btn { padding: 4px 0; justify-content: center; }
   .side-btn { width: 30px; height: 30px; }
   .side-btn .ic { width: 17px; height: 17px; }
   .side-nav-btn .ic { width: 15px; height: 15px; flex: 0 0 15px; }
+  .side-actions, .side-bottom { align-items: center; gap: 1px; }
 }
