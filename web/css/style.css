@@ -1434,6 +1434,7 @@ body { -webkit-tap-highlight-color: transparent; }
   body.toolbar-top .side-brand { margin: 0 8px 0 0; }
   body.toolbar-top .side-sep { width: 1px; height: 24px; margin: 0 4px; }
   body.toolbar-top .side-nav { flex-direction: row; flex-wrap: wrap; gap: 2px; }
+  body.toolbar-top .side-nav-title { display: none; }   /* vertical group headers don't belong in a horizontal strip */
   body.toolbar-top .side-nav-btn { padding: 8px 9px; }
   body.toolbar-top .side-actions,
   body.toolbar-top .side-bottom { flex-direction: row; margin: 0; gap: 2px; flex-wrap: wrap; }
