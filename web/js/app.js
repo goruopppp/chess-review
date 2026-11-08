@@ -2407,6 +2407,27 @@
     });
   }
 
+  function donutMarkup(w, total, C) {
+    let inner = `<circle class="lab-dn-ring" cx="52" cy="52" r="40"/>`;
+    let off = 0;
+    [["wins", w.wins, "#40B88B"], ["draws", w.draws, "#c3c8d4"], ["losses", w.losses, "#E4775B"]].forEach(([, n, col]) => {
+      if (!n) return;
+      const frac = n / total;
+      inner += `<circle class="lab-dn-seg" cx="52" cy="52" r="40" stroke="${col}"`
+        + ` stroke-dasharray="${(frac * C).toFixed(1)} ${(C - frac * C).toFixed(1)}"`
+        + ` stroke-dashoffset="${(-off * C).toFixed(1)}"/>`;
+      off += frac;
+    });
+    inner += `<text class="lab-dn-num" x="52" y="58">${total}</text><text class="lab-dn-sub" x="52" y="71">games</text>`;
+    return inner;
+  }
+
+  function donutSideMarkup(w, total) {
+    return `<div class="lab-ds-row"><span class="lab-ds-dot" style="background:#40B88B"></span>Wins<b>${w.wins} (${total ? Math.round(100 * w.wins / total) : 0}%)</b></div>`
+      + `<div class="lab-ds-row"><span class="lab-ds-dot" style="background:#c3c8d4"></span>Draws<b>${w.draws} (${total ? Math.round(100 * w.draws / total) : 0}%)</b></div>`
+      + `<div class="lab-ds-row"><span class="lab-ds-dot" style="background:#E4775B"></span>Losses<b>${w.losses} (${total ? Math.round(100 * w.losses / total) : 0}%)</b></div>`;
+  }
+
   function paintLabDonut(wdl) {
     const tile = labTile("games");
     if (!tile) return;
@@ -2422,23 +2443,9 @@
       if (side) side.innerHTML = `<div class="lab-ds-row">No reviewed games yet.</div>`;
       return;
     }
-    let inner = `<circle class="lab-dn-ring" cx="52" cy="52" r="40"/>`;
-    let off = 0;
-    [["wins", w.wins, "#2ebd59"], ["draws", w.draws, "#c3c8d4"], ["losses", w.losses, "#f0554d"]].forEach(([, n, col]) => {
-      if (!n) return;
-      const frac = n / total;
-      inner += `<circle class="lab-dn-seg" cx="52" cy="52" r="40" stroke="${col}"`
-        + ` stroke-dasharray="${(frac * C).toFixed(1)} ${(C - frac * C).toFixed(1)}"`
-        + ` stroke-dashoffset="${(-off * C).toFixed(1)}"/>`;
-      off += frac;
-    });
-    inner += `<text class="lab-dn-num" x="52" y="58">${total}</text><text class="lab-dn-sub" x="52" y="71">games</text>`;
-    svg.innerHTML = inner;
+    svg.innerHTML = donutMarkup(w, total, C);
     if (side) {
-      side.innerHTML =
-        `<div class="lab-ds-row"><span class="lab-ds-dot" style="background:#2ebd59"></span>Wins<b>${w.wins} (${total ? Math.round(100 * w.wins / total) : 0}%)</b></div>`
-        + `<div class="lab-ds-row"><span class="lab-ds-dot" style="background:#c3c8d4"></span>Draws<b>${w.draws} (${total ? Math.round(100 * w.draws / total) : 0}%)</b></div>`
-        + `<div class="lab-ds-row"><span class="lab-ds-dot" style="background:#f0554d"></span>Losses<b>${w.losses} (${total ? Math.round(100 * w.losses / total) : 0}%)</b></div>`;
+      side.innerHTML = donutSideMarkup(w, total);
     }
   }
 
@@ -2547,7 +2554,9 @@
       const r = axis.v == null ? 0 : R * (Math.max(5, axis.v) / 100);
       const [x, y] = pt(i, n, r);
       opt += (i ? "" : "") + `${x.toFixed(1)},${y.toFixed(1)} `;
-      dots += `<circle class="lab-radar-dot ${axis.v == null ? "dim" : ""}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3"/>`;
+    dots += axis.v == null
+      ? `<circle class="lab-radar-dot dim" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3"/>`
+      : `<circle class="lab-radar-badge" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="8"/><text class="lab-rbadge-t" x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}">${axis.v == null ? "" : axis.v}</text>`;
       const [lx, ly] = pt(i, n, R + 17);
       const anchor = Math.abs(lx - cx) < 8 ? "middle" : lx > cx ? "start" : "end";
       const dy = ly < cy ? -2 : 8;
@@ -2851,14 +2860,241 @@
       $("viewLab").scrollTop = 0;
       refreshLab();
     }
+    if (labOpen && ovOpenState) applyOverview(false);   // v71: pages are mutually exclusive
+    syncNav();
   }
   $("btnLab").onclick = () => showLab(!labOpen);
   $("labBackBtn").onclick = () => showLab(false);
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && labOpen && !document.querySelector(".modal-backdrop:not([hidden])")) {
-      showLab(false);
+    if (e.key === "Escape" && !document.querySelector(".modal-backdrop:not([hidden])")) {
+      if (labOpen) showLab(false);
+      else if (ovOpenState) applyOverview(false);
     }
   });
+
+  /* ═══════════════ v71 Overview dashboard (Aimchess-style, real data only) ═══════════════ */
+  let ovOpenState = false;
+  function applyOverview(open) {
+    ovOpenState = !!open;
+    $("viewOverview").hidden = !ovOpenState;
+    const ma = document.querySelector(".main-area");
+    if (ma) ma.classList.toggle("overview-open", ovOpenState);
+    $("btnOverview").classList.toggle("active", ovOpenState);
+    if (ovOpenState && labOpen) showLab(false);   // exclusive pages
+    if (ovOpenState) {
+      $("viewOverview").scrollTop = 0;
+      refreshOverview();
+    }
+    syncNav();
+  }
+  function syncNav() {
+    const apiDist = document.getElementById("viewOverview");
+    const onOverview = ovOpenState && apiDist && !apiDist.hidden;
+    const labEl = document.getElementById("viewLab");
+    const onLab = labOpen && labEl && !labEl.hidden;
+    const els = { overview: $("btnOverview"), lab: $("btnLabNav"), review: $("btnReviewNav") };
+    Object.values(els).forEach((b) => b && b.classList.remove("active"));
+    const k = onOverview ? "overview" : onLab ? "lab" : "review";
+    if (els[k]) els[k].classList.add("active");
+  }
+
+  async function refreshOverview() {
+    try {
+      const [d, s, g, w, r] = await Promise.all([
+        api("/api/perf/overall"),
+        api("/api/perf/series?color=" + getLabColor()),
+        api("/api/perf/games?limit=30"),
+        api("/api/perf/weaknesses"),
+        api("/api/perf/recommendations"),
+      ]);
+      paintOvStats(d, s, w);
+      paintOvDonut(s && s.wdl);
+      paintOvSkills(s && s.skills, s && s.wdl);
+      paintOvOpenings(d && d.openings);
+      paintOvInsights(r && r.recommendations);
+      paintOvWeaknesses(w);
+      paintOvGames((g.games || []).slice(0, 6), g && g.total);
+    } catch (e) {
+      $("ovRating").textContent = "\u2014"; $("ovWin").textContent = "\u2014"; $("ovGames").textContent = "\u2014";
+      $("ovSkills").innerHTML = ""; $("ovDonut").innerHTML = ""; $("ovDonutSide").innerHTML = "";
+      $("ovWeakList").innerHTML = ""; $("ovOpenings").innerHTML = ""; $("ovInsights").innerHTML = ""; $("ovGameList").innerHTML = "";
+      $("ovSkillsMeta").textContent = ""; $("ovDonutMeta").textContent = ""; $("ovGamesMeta").textContent = "server still waking up";
+      $("ovOpeningsMeta").textContent = "";
+    }
+  }
+
+  function paintOvStats(d, s, w) {
+    const wdl = (s && s.wdl) || { wins: 0, losses: 0, draws: 0, total: 0 };
+    $("ovRating").textContent = (d && d.avgRating != null) ? String(Math.round(d.avgRating)) : "\u2014";
+    $("ovWin").textContent = wdl.total ? Math.round(100 * wdl.wins / wdl.total) + "%" : "\u2014";
+    $("ovGames").textContent = wdl.total ? String(wdl.total) : "\u2014";
+    $("ovWinNote").textContent = getLabColor() === "black" ? "black side of your games" : "white side of your games";
+    $("ovGamesNote").textContent = wdl.total ? "reviewed games" : "no reviewed games yet";
+    $("ovSkillsMeta").textContent = wdl.total ? wdl.total + " reviewed game" + (wdl.total === 1 ? "" : "s") : "";
+    $("ovDonutMeta").textContent = wdl.total ? wdl.wins + "W " + wdl.draws + "D " + wdl.losses + "L" : "";
+    // weaknesses carry their own sample sizes; keep the card hidden while nothing is stored
+    const wc = $("ovWeakCard");
+    if (wc) wc.hidden = !(wdl.total || (d && d.total));
+  }
+
+  function paintOvDonut(wdl) {
+    const w = { wins: (wdl && wdl.wins) || 0, draws: (wdl && wdl.draws) || 0, losses: (wdl && wdl.losses) || 0 };
+    const total = w.wins + w.draws + w.losses;
+    const svg = $("ovDonut"), side = $("ovDonutSide");
+    if (!svg) return;
+    if (!total) {
+      svg.innerHTML = `<circle class="lab-dn-ring" cx="52" cy="52" r="40"/><text class="lab-dn-empty" x="52" y="56">No games</text>`;
+      side.innerHTML = `<div class="lab-ds-row">No reviewed games yet.</div>`;
+      return;
+    }
+    svg.innerHTML = donutMarkup(w, total, 2 * Math.PI * 40);
+    side.innerHTML = donutSideMarkup(w, total);
+  }
+
+  const OV_SKILL_NAMES = {
+    rating: "Rating", opening: "Opening", middlegame: "Middlegame", endgame: "Endgame",
+    tactics: "Tactics", time_mgmt: "Time management", resourcefulness: "Resourcefulness",
+  };
+  function paintOvSkills(skills, wdl) {
+    const el = $("ovSkills");
+    if (!el) return;
+    const rows = [];
+    Object.keys(OV_SKILL_NAMES).forEach((k) => {
+      const d = skills && skills[k];
+      if (d && d.points && d.points.length && d.avg != null) {
+        rows.push(`<div class="ov-skill"><span class="ov-skill-name">${OV_SKILL_NAMES[k]}</span>`
+          + `<span class="ov-bar-track"><span class="ov-bar-fill" style="width:${Math.round(d.avg)}%"></span></span>`
+          + `<span class="ov-skill-val">${Math.round(d.avg)}/100</span></div>`);
+      }
+    });
+    if (!rows.length) {
+      el.innerHTML = `<div class="lab-empty">Review some games and your skill scores appear here.</div>`;
+      return;
+    }
+    el.innerHTML = rows.join("");
+  }
+
+  function paintOvOpenings(families) {
+    const el = $("ovOpenings"), meta = $("ovOpeningsMeta");
+    if (!el) return;
+    const all = Object.entries(families || {})
+      .filter(([, f]) => (f.games || 0) > 0)
+      .map(([name, f]) => ({ name, wins: f.wins || 0, draws: f.draws || 0, losses: f.losses || 0, games: f.games || 0 }))
+      .sort((a, b) => b.games - a.games);
+    const list = all.slice(0, 7);
+    if (!list.length) {
+      el.innerHTML = `<div class="lab-empty">No classified games yet — import a PGN to populate this.</div>`;
+      meta.textContent = "";
+      return;
+    }
+    el.innerHTML = list.map((f) => {
+      const score = (f.wins + 0.5 * f.draws) / f.games;
+      const width = Math.min(50, Math.abs(score - 0.5) * 100);
+      const cls = score >= 0.5 ? "up" : "down";
+      return `<div class="ov-op"><span class="ov-op-name">${labEscape(f.name)}</span>`
+        + `<span class="ov-op-track"><span class="ov-op-mid"></span><span class="ov-op-fill ${cls}" style="width:${width.toFixed(1)}%"></span></span>`
+        + `<span class="ov-op-val"><b>${score.toFixed(2)}</b> &middot; ${f.games}g</span></div>`;
+    }).join("");
+    meta.textContent = "average score per opening family · " + list.length + " shown of " + all.length;
+  }
+
+  function paintOvInsights(recs) {
+    const el = $("ovInsights");
+    if (!el) return;
+    const list = (recs || []).slice(0, 3);
+    if (!list.length) {
+      el.innerHTML = `<div class="lab-empty">No drills yet — review more games and recommendations appear here.</div>`;
+      return;
+    }
+    el.innerHTML = list.map((rec, i) => `
+      <div class="lab-rec prio-${rec.priority === "high" ? "high" : rec.priority === "medium" ? "medium" : "low"}">
+        <span class="lab-rec-num">${i + 1}</span>
+        <span><div class="lab-rec-title">${labEscape(rec.title)}<span class="lab-rec-category">${rec.category}</span></div>
+          <div class="lab-rec-body">${labEscape(rec.exerciseFocus)}</div>
+          <div class="lab-rec-why">${labEscape(rec.why)}</div></span>
+      </div>`).join("");
+  }
+
+  function paintOvWeaknesses(w) {
+    const el = $("ovWeakList"), meta = $("ovWeakMeta");
+    if (!el) return;
+    const list = (w && w.weaknesses) || [];
+    if (meta) {
+      meta.textContent = (w && list.length)
+        ? `${w.reviewedGames || 0} reviewed · top ${Math.min(3, list.length)} of ${list.length} pattern${list.length === 1 ? "" : "s"}`
+        : "";
+    }
+    if (!list.length) {
+      el.innerHTML = `<div class="lab-empty">${labEscape((w && w.note) || "Nothing to see yet — review more games to surface patterns here.")}</div>`;
+      return;
+    }
+    el.innerHTML = list.slice(0, 3).map((f) => `
+      <div class="lab-weak">
+        <span class="lab-weak-stripe sev-${f.severity === 'high' ? 'high' : f.severity === 'medium' ? 'medium' : 'low'}"></span>
+        <div>
+          <div class="lab-weak-title">${labEscape(f.label)}</div>
+          <div class="lab-weak-desc">${labEscape(f.description)}</div>
+        </div>
+        <div class="lab-weak-right">
+          <span class="lab-weak-count sev-${f.severity === 'high' ? 'high' : f.severity === 'medium' ? 'medium' : 'low'}">${f.count}</span>
+          <span class="lab-weak-conf">${f.confidence} conf.</span>
+        </div>
+      </div>`).join("");
+  }
+
+  function paintOvGames(list, total) {
+    const el = $("ovGameList"), meta = $("ovGamesMeta");
+    if (!el) return;
+    if (!total) { el.innerHTML = `<div class="lab-empty">No reviewed games yet — run a review or import a PGN.</div>`; meta.textContent = ""; return; }
+    meta.textContent = `latest ${list.length} of ${total}`;
+    el.innerHTML = list.map((g) => {
+      const cls = g.result === "1-0" ? "win" : g.result === "0-1" ? "loss" : "draw";
+      const label = g.result === "1-0" ? "1-0" : g.result === "0-1" ? "0-1" : "&frac12;-&frac12;";
+      return `<div class="lab-game">
+        <span class="lab-game-res ${cls}">${label}</span>
+        <span><div class="lab-game-name">${labEscape(g.white)} vs ${labEscape(g.black)}</div>
+          <div class="lab-game-meta">${labEscape(g.opening)} &middot; ${labEscape(g.date || "?")} &middot; ${labEscape(g.tcBucket)}</div></span>
+        <span class="lab-game-meta">${g.reviewed ? "reviewed" : ""}</span>
+      </div>`;
+    }).join("");
+  }
+
+  function setOvColor(c) {
+    c = c === "black" ? "black" : "white";
+    document.querySelectorAll("#ovColorToggle .lab-seg").forEach((b) => {
+      b.classList.toggle("active", b.dataset.color === c);
+    });
+    document.querySelectorAll("#labColorToggle .lab-seg").forEach((b) => {
+      b.classList.toggle("active", b.dataset.color === c);
+    });
+    setLabColor(c);
+    refreshOverview();
+  }
+
+  /* ---- v71 sidebar destinations: every link opens an existing surface ---- */
+  $("btnOverview").onclick = () => applyOverview(!ovOpenState);
+  $("ovBackBtn").onclick = () => applyOverview(false);
+  $("btnReviewNav").onclick = () => { applyOverview(false); showLab(false); };
+  $("btnHistoryNav").onclick = () => { applyOverview(false); renderLibrary(); $("modalLibrary").hidden = false; };
+  $("btnLabNav").onclick = () => { applyOverview(false); showLab(true); };
+  $("btnOpeningsNav").onclick = () => { applyOverview(false); showLab(false); switchTab("explorer"); };
+  $("btnWeakNav").onclick = () => {
+    if (!ovOpenState) applyOverview(true);
+    const c = $("ovWeakCard");
+    if (c && !c.hidden) c.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  $("btnTrainNav").onclick = () => { applyOverview(false); showLab(false); switchTab("trainer"); };
+  document.querySelectorAll("#ovColorToggle .lab-seg").forEach((b) => {
+    b.classList.toggle("active", b.dataset.color === getLabColor());
+    b.onclick = () => setOvColor(b.dataset.color);
+  });
+  try {
+    if (localStorage.getItem("crs_side_collapsed") === "1") document.body.classList.add("side-collapsed");
+  } catch (e) { /* private mode */ }
+  $("btnColl").onclick = () => {
+    const on = document.body.classList.toggle("side-collapsed");
+    try { localStorage.setItem("crs_side_collapsed", on ? "1" : "0"); } catch (e) { /* private mode */ }
+  };
 
   /* ---------------- Lichess puzzles (v60) ---------------- */
   let pzStats = { solved: 0, streak: 0, best: 0, rating: 1200 };
@@ -4171,8 +4407,8 @@
     light: '<svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" fill="currentColor"/></svg>',
   };
   function applyUiTheme() {
-    let v = "dark";
-    try { v = localStorage.getItem("crs_ui_theme") || "dark"; } catch (e) { /* no storage */ }
+    let v = "light";
+    try { v = localStorage.getItem("crs_ui_theme") || "light"; } catch (e) { /* no storage */ }
     document.documentElement.dataset.uiTheme = v;
     const b = $("btnUiTheme");
     if (b) {
