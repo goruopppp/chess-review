@@ -1,16 +1,52 @@
 <!doctype html>
-<html lang="en" data-ui-theme="dark">
+<html lang="en" data-ui-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=70">
+<link rel="stylesheet" href="css/style.css?v=71">
 </head>
 <body>
 <div class="app-shell">
   <nav class="sidebar" aria-label="Primary actions">
-    <div class="side-brand" aria-hidden="true">&#9822;</div>
+    <div class="side-brand">
+      <span aria-hidden="true">&#9822;</span>
+      <span class="brand-t">Chess Review<b>Studio</b><small>performance suite</small></span>
+    </div>
+    <div class="side-nav" aria-label="Pages">
+      <div class="side-nav-title">Analyze</div>
+      <button id="btnOverview" class="side-nav-btn" type="button">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></g></svg>
+        <span class="lbl">Overview</span>
+      </button>
+      <button id="btnReviewNav" class="side-nav-btn" type="button">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16M12 4v16"/></g></svg>
+        <span class="lbl">Game review</span>
+      </button>
+      <button id="btnHistoryNav" class="side-nav-btn" type="button">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21z"/><path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H20"/></g></svg>
+        <span class="lbl">Game history</span>
+      </button>
+      <button id="btnLabNav" class="side-nav-btn" type="button">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7"/></g></svg>
+        <span class="lbl">Analytics &middot; Lab</span>
+      </button>
+      <div class="side-nav-title">Improve</div>
+      <button id="btnWeakNav" class="side-nav-btn" type="button">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22"/></g></svg>
+        <span class="lbl">Weaknesses</span>
+      </button>
+      <button id="btnOpeningsNav" class="side-nav-btn" type="button">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.5 5 8.5 4 4.5 4v14c4 0 6 1 7.5 2.5 1.5-1.5 3.5-2.5 7.5-2.5V4c-4 0-6 1-7.5 2.5z"/><path d="M12 6.5v14"/></g></svg>
+        <span class="lbl">Opening stats</span>
+      </button>
+      <button id="btnTrainNav" class="side-nav-btn" type="button">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/></g></svg>
+        <span class="lbl">Training</span>
+      </button>
+    </div>
+    <div class="side-nav-title">Board tools</div>
     <div class="side-actions">
       <button id="btnNew" class="side-btn primary" type="button" title="New review" aria-label="New review">
         <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg>
@@ -33,6 +69,9 @@
       </button>
     </div>
     <div class="side-bottom">
+      <button id="btnColl" class="side-btn" type="button" title="Collapse menu" aria-label="Collapse menu">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5 8 12l6.5 6.5"/></g></svg>
+      </button>
       <button id="btnUiTheme" class="side-btn" type="button" title="Toggle light / dark" aria-label="Toggle light or dark theme"></button>
       <button id="btnSettings" class="side-btn" type="button" title="Settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></g><circle cx="9" cy="7" r="2.2" fill="currentColor"/><circle cx="15" cy="12" r="2.2" fill="currentColor"/><circle cx="7" cy="17" r="2.2" fill="currentColor"/></svg>
@@ -430,6 +469,81 @@
     </div>
   </section>
 </main>
+
+<section class="ov-view" id="viewOverview" hidden aria-label="Overview dashboard">
+  <div class="ov-page">
+    <div class="ov-head">
+      <div class="lab-brand">
+        <span class="lab-knight" aria-hidden="true">&#9822;</span>
+        <div>
+          <h3 class="lab-title">Overview</h3>
+          <p class="lab-sub">Your chess performance at a glance.</p>
+        </div>
+      </div>
+      <div class="lab-actions">
+        <span class="lab-color-toggle" id="ovColorToggle" role="group" aria-label="Board color">
+          <button class="lab-seg" data-color="white" type="button" aria-label="Analyze White side">White</button>
+          <button class="lab-seg" data-color="black" type="button" aria-label="Analyze Black side">Black</button>
+        </span>
+        <button id="ovBackBtn" class="lab-btn" type="button" title="Back to the board (Esc)">&#8592; Board</button>
+      </div>
+    </div>
+
+    <div class="ov-statrow">
+      <div class="ov-stat">
+        <span class="ov-k">Rating</span>
+        <span class="ov-v" id="ovRating">&mdash;</span>
+        <span class="ov-s">average rating across stored games</span>
+      </div>
+      <div class="ov-stat">
+        <span class="ov-k">Win rate</span>
+        <span class="ov-v" id="ovWin">&mdash;</span>
+        <span class="ov-s" id="ovWinNote">white side of your games</span>
+      </div>
+      <div class="ov-stat">
+        <span class="ov-k">Games</span>
+        <span class="ov-v" id="ovGames">&mdash;</span>
+        <span class="ov-s" id="ovGamesNote">reviewed games</span>
+      </div>
+    </div>
+
+    <div class="ov-grid">
+      <div class="ov-card">
+        <div class="ov-card-title"><span>Your chess performance</span><span id="ovSkillsMeta"></span></div>
+        <div class="ov-skills" id="ovSkills"></div>
+      </div>
+      <div class="ov-card">
+        <div class="ov-card-title"><span>Game results</span><span id="ovDonutMeta"></span></div>
+        <div class="lab-donut-wrap">
+          <svg class="lab-donut" id="ovDonut" viewBox="0 0 104 104" role="img" aria-label="Wins, draws and losses split"></svg>
+          <div class="lab-donut-side" id="ovDonutSide"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ov-grid">
+      <div class="ov-card" id="ovWeakCard">
+        <div class="ov-card-title"><span>Weaknesses</span><span id="ovWeakMeta"></span></div>
+        <div class="lab-weakness-list" id="ovWeakList"></div>
+      </div>
+      <div class="ov-card">
+        <div class="ov-card-title"><span>Opening performance</span><span id="ovOpeningsMeta"></span></div>
+        <div class="ov-op-list" id="ovOpenings"></div>
+      </div>
+    </div>
+
+    <div class="ov-grid">
+      <div class="ov-card">
+        <div class="ov-card-title"><span>Training insights</span></div>
+        <div class="lab-rec-list" id="ovInsights"></div>
+      </div>
+      <div class="ov-card">
+        <div class="ov-card-title"><span>Recent games</span><span id="ovGamesMeta"></span></div>
+        <div class="lab-game-list" id="ovGameList"></div>
+      </div>
+    </div>
+  </div>
+</section>
 
 <section class="lab-view" id="viewLab" hidden aria-label="Performance Lab">
   <div class="lab-page">
@@ -856,6 +970,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=70"></script>
+<script src="js/app.js?v=71"></script>
 </body>
 </html>
