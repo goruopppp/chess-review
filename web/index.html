@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=78">
+<link rel="stylesheet" href="css/style.css?v=79">
 </head>
 <body>
 <div class="app-shell">
@@ -872,6 +872,13 @@
           </div>
         </div>
         <div class="apple-row">
+          <div class="apple-row-main"><span class="apple-label">Toolbar position</span><span class="apple-desc">Desktop: navigation on the side or across the top</span></div>
+          <div class="segmented" id="setToolbarPos" role="group" aria-label="Toolbar position">
+            <button type="button" data-value="side" class="active">Side</button>
+            <button type="button" data-value="top">Top</button>
+          </div>
+        </div>
+        <div class="apple-row">
           <div class="apple-row-main"><span class="apple-label">Board theme</span></div>
           <div class="swatches" id="setBoardTheme" role="group" aria-label="Board theme">
             <button type="button" data-value="green" class="active" title="Green"><span class="sw" style="--l:#ebecd0;--d:#739552"></span></button>
@@ -970,6 +977,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=78"></script>
+<script src="js/app.js?v=79"></script>
 </body>
 </html>
