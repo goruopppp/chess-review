@@ -2891,6 +2891,18 @@
     }
     syncNav();
   }
+  /* deterministic destination scroll: mobile shell scrolls the document, while an
+     overflow:auto section ancestor (*-view) can own-but-never-scroll the chain */
+  function scrollToEl(el) {
+    if (!el) return;
+    const se = document.scrollingElement;
+    if (se && se.scrollHeight > se.clientHeight + 1) {
+      const y = el.getBoundingClientRect().top + (se.scrollTop || 0) - 10;
+      window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+    } else {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
   function syncNav() {
     const apiDist = document.getElementById("viewOverview");
     const onOverview = ovOpenState && apiDist && !apiDist.hidden;
@@ -3093,20 +3105,19 @@
     navFocus = "openings";
     applyOverview(false);
     showLab(true);   // the Lab holds your real opening-families table
-    setTimeout(() => { const c = $("labOpeningCard"); if (c) c.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
+    setTimeout(() => scrollToEl($("labOpeningCard")), 60);
   };
   $("btnWeakNav").onclick = () => {
     navFocus = "overview";
     if (!ovOpenState) applyOverview(true);
-    const c = $("ovWeakCard");
-    if (c && !c.hidden) c.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => scrollToEl($("ovWeakCard")), 60);
   };
   $("btnTrainNav").onclick = () => {
     navFocus = "train";
     applyOverview(false);
     showLab(false);
     switchTab("trainer");   // the SM-2 mistake-trainer dashboard is the training surface
-    setTimeout(() => { const b = $("tab-trainer"); if (b) b.scrollIntoView({ behavior: "smooth", block: "start" }); }, 60);
+    setTimeout(() => scrollToEl($("tab-trainer")), 60);
   };
   document.querySelectorAll("#ovColorToggle .lab-seg").forEach((b) => {
     b.classList.toggle("active", b.dataset.color === getLabColor());
