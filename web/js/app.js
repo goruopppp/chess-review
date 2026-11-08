@@ -52,6 +52,15 @@
     markPicker("setBoardSize", v);
   }
 
+  /* v79: desktop toolbar position — side (default) or a top strip (persisted) */
+  function applyToolbarPos() {
+    let v = "side";
+    try { v = localStorage.getItem("crs_toolbar_pos") || "side"; } catch (e) { /* no storage */ }
+    if (v !== "side" && v !== "top") v = "side";
+    document.body.classList.toggle("toolbar-top", v === "top");
+    markPicker("setToolbarPos", v);
+  }
+
   /* board color theme + piece image set (chess.com-style customization, persisted) */
   function applyBoardTheme() {
     let v = "green";
@@ -4416,6 +4425,12 @@
     try { localStorage.setItem("crs_board_size", v); } catch (e) { /* no storage */ }
     applyBoardSize();
   });
+  bindPicker("setToolbarPos", (v) => {
+    try { localStorage.setItem("crs_toolbar_pos", v); } catch (e) { /* no storage */ }
+    applyToolbarPos();
+    // re-measure graph canvases once the desktop shell has reflowed
+    setTimeout(() => { try { graph.resize(); } catch (e) { /* graph not ready */ } }, 100);
+  });
   bindPicker("setBoardTheme", (v) => {
     try { localStorage.setItem("crs_board_theme", v); } catch (e) { /* no storage */ }
     applyBoardTheme();
@@ -4561,6 +4576,7 @@
   applyUiTheme();
   repRefreshSaved();
   applyBoardSize();
+  applyToolbarPos();
   applyBoardTheme();
   applyAnimSetting();
   applyPieceTheme();
