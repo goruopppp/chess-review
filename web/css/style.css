@@ -1215,7 +1215,9 @@ body { -webkit-tap-highlight-color: transparent; }
 .lab-ds-row b { margin-left: auto; color: #24233f; font-weight: 800; font-variant-numeric: tabular-nums; }
 
 .lab-weakness-list { display: flex; flex-direction: column; gap: 7px; }
-.lab-weak { position: relative; display: grid; grid-template-columns: 5px 1fr auto; align-items: center; gap: 10px; background: #f8f7fd; border: 1px solid #eeeaf9; border-radius: 10px; padding: 9px 10px 8px 0; overflow: hidden; }
+.lab-weak { position: relative; display: grid; grid-template-columns: 5px minmax(0,1fr) auto; align-items: center; gap: 10px; background: #f8f7fd; border: 1px solid #eeeaf9; border-radius: 10px; padding: 9px 10px 8px 0; overflow: hidden; }
+.lab-weak > div { grid-column: 2; min-width: 0; }
+.lab-weak > div.lab-weak-right { grid-column: 3; }
 .lab-weak-stripe { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; border-radius: 5px 0 0 5px; }
 .lab-weak-stripe.sev-high { background: linear-gradient(180deg, #f0503e, #d8341f); }
 .lab-weak-stripe.sev-medium { background: linear-gradient(180deg, #f5a524, #f97316); }
