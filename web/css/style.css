@@ -1377,20 +1377,25 @@ body { -webkit-tap-highlight-color: transparent; }
 
 /* collapsed + mobile nav */
 @media (max-width: 980px) {
-  .sidebar { overflow: visible; }
-  .side-nav { flex-direction: row; gap: 2px; }
+  /* v77: the strip holds brand + 7 nav icons + 9 tools + collapse/theme/settings;
+     wrap instead of clipping the last buttons off the right edge */
+  .sidebar { overflow: visible; flex-wrap: wrap; }
+  .side-nav { flex-direction: row; gap: 2px; flex-wrap: wrap; }
   .side-nav-title { display: none; }
-  .side-nav-btn { padding: 8px 9px; }
+  .side-nav-btn { padding: 8px 6px; }
   .side-nav-btn .lbl { display: none; }
   .side-brand { margin: 0 4px 0 0; }
+  .side-actions, .side-bottom { flex-direction: row; flex-wrap: wrap; gap: 2px; }
+  .side-btn { width: 34px; height: 34px; }
+  .side-btn .ic { width: 17px; height: 17px; }
   body.side-collapsed .sidebar { width: 100%; flex-basis: auto; }
-  .side-actions, .side-bottom { flex-direction: row; }
 }
 @media (max-width: 640px) {
   .ov-statrow { grid-template-columns: 1fr; }
   .ov-grid { grid-template-columns: 1fr; }
   .ov-page { padding: 12px 12px 22px; }
-  .side-nav-btn { padding: 8px 8px; }
+  .side-nav-btn { padding: 8px 4px; }
+  .side-btn { width: 32px; height: 32px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ov-bar-fill, .sidebar { transition: none; }
