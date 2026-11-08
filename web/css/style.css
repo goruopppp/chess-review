@@ -1444,3 +1444,33 @@ body { -webkit-tap-highlight-color: transparent; }
      body.side-collapsed rules; the strip just stops pretending to be a 56px column */
   body.toolbar-top.side-collapsed .sidebar { width: 100%; flex-basis: auto; padding: 4px 12px 6px; }
 }
+
+/* ---------- v80: short desktop windows must keep the bottom rail reachable ---------- */
+/* the side rail needs ~900px fully expanded; on smaller heights it clipped
+   collapse / theme / settings past the viewport bottom */
+@media (min-width: 981px) {
+  /* backstop: let the rail scroll instead of clipping (scrollbar kept invisible) */
+  .sidebar { overflow-y: auto; overflow-x: hidden; scrollbar-width: none; }
+  .sidebar::-webkit-scrollbar { display: none; }
+}
+/* compress the rail so it usually fits without scrolling at all */
+@media (min-width: 981px) and (max-height: 900px) {
+  .sidebar { padding: 8px 10px; gap: 4px; }
+  .side-brand { height: 36px; margin: 0 0 2px; }
+  .side-nav-title { padding: 4px 10px 2px; }
+  .side-nav-btn { padding: 5px 10px; }
+  .side-btn { width: 36px; height: 36px; }
+  .side-actions, .side-bottom { gap: 1px; }
+}
+@media (min-width: 981px) and (max-height: 700px) {
+  /* very short windows: icon-only rail, like the collapsed state */
+  .sidebar { padding: 6px 10px; }
+  .side-brand { height: 28px; margin: 0 0 2px; }
+  .side-brand .brand-t,
+  .side-nav-title,
+  .side-nav-btn .lbl { display: none; }
+  .side-nav-btn { padding: 4px; justify-content: center; }
+  .side-btn { width: 30px; height: 30px; }
+  .side-btn .ic { width: 17px; height: 17px; }
+  .side-nav-btn .ic { width: 15px; height: 15px; flex: 0 0 15px; }
+}
