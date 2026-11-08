@@ -2915,7 +2915,10 @@
       paintOvWeaknesses(w);
       paintOvGames((g.games || []).slice(0, 6), g && g.total);
     } catch (e) {
-      $("ovRating").textContent = "\u2014"; $("ovWin").textContent = "\u2014"; $("ovGames").textContent = "\u2014";
+      [["ovRating"], ["ovWin"], ["ovGames"]].forEach(([, id]) => {
+        const el = $(id);
+        el.textContent = "\u2013"; el.style.color = "var(--muted)";
+      });
       $("ovSkills").innerHTML = ""; $("ovDonut").innerHTML = ""; $("ovDonutSide").innerHTML = "";
       $("ovWeakList").innerHTML = ""; $("ovOpenings").innerHTML = ""; $("ovInsights").innerHTML = ""; $("ovGameList").innerHTML = "";
       $("ovSkillsMeta").textContent = ""; $("ovDonutMeta").textContent = ""; $("ovGamesMeta").textContent = "server still waking up";
@@ -2925,9 +2928,11 @@
 
   function paintOvStats(d, s, w) {
     const wdl = (s && s.wdl) || { wins: 0, losses: 0, draws: 0, total: 0 };
-    $("ovRating").textContent = (d && d.avgRating != null) ? String(Math.round(d.avgRating)) : "\u2014";
-    $("ovWin").textContent = wdl.total ? Math.round(100 * wdl.wins / wdl.total) + "%" : "\u2014";
-    $("ovGames").textContent = wdl.total ? String(wdl.total) : "\u2014";
+    const dash = (el) => { el.textContent = "\u2013"; el.style.color = "var(--muted)"; };
+    const num = (el, txt) => { el.textContent = txt; el.style.color = ""; };
+    if (d && d.avgRating != null) num($("ovRating"), String(Math.round(d.avgRating))); else dash($("ovRating"));
+    if (wdl.total) num($("ovWin"), Math.round(100 * wdl.wins / wdl.total) + "%"); else dash($("ovWin"));
+    if (wdl.total) num($("ovGames"), String(wdl.total)); else dash($("ovGames"));
     $("ovWinNote").textContent = getLabColor() === "black" ? "black side of your games" : "white side of your games";
     $("ovGamesNote").textContent = wdl.total ? "reviewed games" : "no reviewed games yet";
     $("ovSkillsMeta").textContent = wdl.total ? wdl.total + " reviewed game" + (wdl.total === 1 ? "" : "s") : "";
