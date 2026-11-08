@@ -1366,6 +1366,8 @@ body { -webkit-tap-highlight-color: transparent; }
 .ov-op-val b { color: var(--text); font-weight: 800; }
 
 .ov-list-cap { font-size: 9.5px; color: var(--muted); letter-spacing: .4px; margin: 2px 0 0; }
+/* when the weaknesses card is hidden (no data yet), let its sibling span the row */
+#ovWeakCard[hidden] + .ov-card { grid-column: 1 / -1; }
 
 /* radar: Aimchess value badges */
 .lab-radar circle.lab-radar-badge { fill: #8050E8; stroke: none; }
