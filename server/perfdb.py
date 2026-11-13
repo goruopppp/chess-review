@@ -18,8 +18,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
+    from server import db
     from server import eco as ECO
 except ImportError:
+    import db  # type: ignore
     import eco as ECO  # type: ignore
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "perfdb.sqlite"
@@ -33,7 +35,7 @@ def _connect():
     global _conn
     if _conn is None:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        conn = db.connect("perfdb", DB_PATH)
         conn.execute("""CREATE TABLE IF NOT EXISTS games (
             id TEXT PRIMARY KEY,
             fen TEXT NOT NULL,
@@ -47,10 +49,12 @@ def _connect():
             event TEXT DEFAULT '', source TEXT DEFAULT 'import',
             reviewed INTEGER NOT NULL DEFAULT 0,
             pgn_text TEXT NOT NULL,
+            user_id TEXT NOT NULL DEFAULT '',
             created_at REAL NOT NULL, updated_at REAL NOT NULL)""")
         conn.execute("""CREATE TABLE IF NOT EXISTS aliases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            alias TEXT NOT NULL UNIQUE, canonical TEXT NOT NULL)""")
+            alias TEXT NOT NULL, canonical TEXT NOT NULL,
+            user_id TEXT NOT NULL DEFAULT '')""")
         conn.execute("""CREATE TABLE IF NOT EXISTS reviews (
             game_id TEXT PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
             white_acc REAL, black_acc REAL,
@@ -61,11 +65,26 @@ def _connect():
             phase_json TEXT DEFAULT '{}',
             time_json TEXT DEFAULT '{}',
             graph_json TEXT DEFAULT '[]',
-            moves_json TEXT DEFAULT '[]')""")
+            moves_json TEXT DEFAULT '[]',
+            user_id TEXT NOT NULL DEFAULT '')""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_games_date ON games(date_ts)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_games_opening ON games(opening)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_games_result ON games(result)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_games_reviewed ON games(reviewed)")
+        # tolerant migration: pre-accounts databases gain the user column;
+        # old rows stay in the shared guest pool ('') and never get dropped
+        gcols = {r[1] for r in conn.execute("PRAGMA table_info(games)")}
+        if "user_id" not in gcols:
+            conn.execute("ALTER TABLE games ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
+        rcols = {r[1] for r in conn.execute("PRAGMA table_info(reviews)")}
+        if "user_id" not in rcols:
+            conn.execute("ALTER TABLE reviews ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
+        acols = {r[1] for r in conn.execute("PRAGMA table_info(aliases)")}
+        if "user_id" not in acols:
+            conn.execute("ALTER TABLE aliases ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
+        # the per-user index comes AFTER the migration: on an older database the
+        # column does not exist yet and CREATE INDEX would fail
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_games_user ON games(user_id)")
         conn.commit()
         # review rows whose games row is missing are pure corruption (an older
         # attach_review left them behind); drop so analytics stay consistent
@@ -205,14 +224,24 @@ def _int_or(v, default):
         return default
 
 
-def _canonical_player(name):
-    """Apply aliases for identity matching; empty means no alias hit."""
+def _row_id(raw_id, user_id):
+    """Content-hash ids are scoped per account by prefixing the user id (guest
+    pool keeps bare ids). All id-based lookups go through the same prefix, so
+    two accounts can hold the same game without colliding on the PK."""
+    raw = (raw_id or "").strip()
+    return f"{user_id}:{raw}" if user_id else raw
+
+
+def _canonical_player(name, user_id=""):
+    """Apply per-user aliases for identity matching; empty means no alias hit."""
     name = (name or "").strip()
     if not name:
         return name
     with _lock:
         conn = _connect()
-        row = conn.execute("SELECT canonical FROM aliases WHERE alias = ? COLLATE NOCASE", (name,)).fetchone()
+        row = conn.execute(
+            "SELECT canonical FROM aliases WHERE alias = ? COLLATE NOCASE AND user_id = ?",
+            (name, user_id)).fetchone()
     return row[0] if row else name
 
 
@@ -225,16 +254,18 @@ def canonical_players_sql(name_tokens):
 # ---------------------------------------------------------------- persistence
 
 
-def import_games(games, source="import"):
+def import_games(games, source="import", user_id=""):
     counts = {"inserted": 0, "duplicates": 0, "skipped": 0}
     with _lock:
         conn = _connect()
         try:
             conn.execute("BEGIN")
             for g in games:
-                white = _canonical_player(g["white"])
-                black = _canonical_player(g["black"])
-                cur = conn.execute("SELECT 1 FROM games WHERE id = ?", (g["id"],)).fetchone()
+                white = _canonical_player(g["white"], user_id)
+                black = _canonical_player(g["black"], user_id)
+                rid = _row_id(g["id"], user_id)
+                cur = conn.execute("SELECT 1 FROM games WHERE id = ? AND user_id = ?",
+                                   (rid, user_id)).fetchone()
                 if cur:
                     counts["duplicates"] += 1
                     continue
@@ -243,12 +274,12 @@ def import_games(games, source="import"):
                     "INSERT INTO games("
                     "id, fen, white, black, white_elo, black_elo, result, date, date_ts,"
                     "time_control, tc_bucket, opening, eco, ply_count, event, source,"
-                    "reviewed, pgn_text, created_at, updated_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (g["id"], g["fen"], white, black, g["whiteElo"] or None, g["blackElo"] or None,
+                    "reviewed, pgn_text, user_id, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (rid, g["fen"], white, black, g["whiteElo"] or None, g["blackElo"] or None,
                      g["result"], g["date"], g["dateTs"], g["timeControl"], g["tcBucket"],
                      g["opening"], g["eco"], g["plyCount"], g["event"], source,
-                     0, g["pgn"], now, now))
+                     0, g["pgn"], user_id, now, now))
                 counts["inserted"] += 1
             conn.commit()
         except Exception:
@@ -257,7 +288,7 @@ def import_games(games, source="import"):
     return counts
 
 
-def attach_review(res):
+def attach_review(res, user_id=""):
     """Upsert a review payload. Returns (created|updated|missing)."""
     if not isinstance(res, dict):
         return {"ok": False, "reason": "bad payload"}
@@ -274,22 +305,23 @@ def attach_review(res):
     except Exception:
         return {"ok": False, "reason": "positions malformed"}
     gid = None
-    white_c = _canonical_player(white)
-    black_c = _canonical_player(black)
+    white_c = _canonical_player(white, user_id)
+    black_c = _canonical_player(black, user_id)
     explicit_id = (game.get("id") or "").strip()
     with _lock:
         conn = _connect()
         if explicit_id:
-            row = conn.execute("SELECT id FROM games WHERE id = ?", (explicit_id,)).fetchone()
+            row = conn.execute("SELECT id FROM games WHERE id = ? AND user_id = ?",
+                               (_row_id(explicit_id, user_id), user_id)).fetchone()
             if row:
                 gid = row[0]
         if gid is None:
             row = conn.execute(
-                "SELECT id FROM games WHERE fen = ? AND white = ? AND black = ? LIMIT 1",
-                (fen, white_c, black_c)).fetchone()
+                "SELECT id FROM games WHERE fen = ? AND white = ? AND black = ? AND user_id = ? LIMIT 1",
+                (fen, white_c, black_c, user_id)).fetchone()
             gid = row[0] if row else None
     if gid is None:
-        gid = _game_hash(fen, white, black, uci_list)
+        gid = _row_id(_game_hash(fen, white, black, uci_list), user_id)
     now = time.time()
     moves_summary = [{
         "ply": m.get("ply"), "san": m.get("san"), "uci": m.get("uci"),
@@ -333,24 +365,24 @@ def attach_review(res):
                 "INSERT OR IGNORE INTO games("
                 "id, fen, white, black, white_elo, black_elo, result, date, date_ts,"
                 "time_control, tc_bucket, opening, eco, ply_count, event, source,"
-                "reviewed, pgn_text, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'review', 1, ?, ?, ?)",
+                "reviewed, pgn_text, user_id, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'review', 1, ?, ?, ?, ?)",
                 (gid, fen, white_c, black_c, game.get("Result", "*"), game.get("Date", ""),
                  _date_ts(game.get("Date", "")), game.get("TimeControl", ""),
                  _tc_bucket(game.get("TimeControl", "")), game.get("opening", ""),
                  game.get("eco", ""), len(moves), game.get("Event", ""),
-                 str(res.get("pgn") or ""), time.time(), time.time()))
+                 str(res.get("pgn") or ""), user_id, time.time(), time.time()))
             conn.execute(
                 "UPDATE games SET reviewed = 1, updated_at = ?,"
                 " opening = COALESCE(NULLIF(?, ''), opening),"
                 " eco     = COALESCE(NULLIF(?, ''), eco)"
-                " WHERE id = ?",
-                (now, game.get("opening", ""), game.get("eco", ""), gid))
+                " WHERE id = ? AND user_id = ?",
+                (now, game.get("opening", ""), game.get("eco", ""), gid, user_id))
             conn.execute(
                 "INSERT INTO reviews("
                 "game_id, white_acc, black_acc, white_acpl, black_acpl, blunders, mistakes,"
-                " inaccuracies, misses, brilliant, great, phase_json, time_json, graph_json, moves_json) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                " inaccuracies, misses, brilliant, great, phase_json, time_json, graph_json, moves_json, user_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(game_id) DO UPDATE SET"
                 " white_acc=excluded.white_acc, black_acc=excluded.black_acc,"
                 " white_acpl=excluded.white_acpl, black_acpl=excluded.black_acpl,"
@@ -365,7 +397,7 @@ def attach_review(res):
                  blobs["inaccuracies"], blobs["misses"],
                  blobs["brilliant"], blobs["great"],
                  blobs["phase_json"], blobs["time_json"],
-                 blobs["graph_json"], blobs["moves_json"]))
+                 blobs["graph_json"], blobs["moves_json"], user_id))
             conn.commit()
         except Exception:
             conn.rollback()
@@ -376,11 +408,11 @@ def attach_review(res):
 # ---------------------------------------------------------------- reads & analytics
 
 
-def _filtered(where, params):
-    """Compose a safe filtered player/games query fragment."""
+def _filtered(where, params, user_id=""):
+    """Compose a safe filtered player/games query fragment (account-scoped)."""
     return ("SELECT white, black, white_elo, black_elo, result, date, date_ts,"
             " time_control, tc_bucket, opening, eco, ply_count, reviewed, id"
-            " FROM games WHERE " + where), params
+            " FROM games WHERE user_id = ? AND (" + where + ")"), [user_id] + list(params)
 
 
 def _row(conn, gid):
@@ -393,22 +425,24 @@ def _row(conn, gid):
     }
 
 
-def list_games(limit=100):
+def list_games(limit=100, user_id=""):
     with _lock:
         conn = _connect()
         rows = conn.execute(
             "SELECT id, fen, white, black, white_elo, black_elo,"
             " result, date, date_ts, time_control, tc_bucket, opening, eco,"
             " ply_count, source, reviewed FROM games"
-            " ORDER BY date_ts DESC, created_at DESC LIMIT ?", (int(limit),)).fetchall()
+            " WHERE user_id = ?"
+            " ORDER BY date_ts DESC, created_at DESC LIMIT ?", (user_id, int(limit))).fetchall()
     return [_row(None, r) for r in rows]
 
 
-def games_total():
+def games_total(user_id=""):
     """Real games count for the Lab list header ('N shown of M imported')."""
     with _lock:
         conn = _connect()
-        return conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+        return conn.execute("SELECT COUNT(*) FROM games WHERE user_id = ?",
+                            (user_id,)).fetchone()[0]
 
 
 # ---------------------------------------------------------------- aimchess-style behavior metrics
@@ -456,7 +490,7 @@ def _consistency_score(sd):
     return max(0, min(100, round(100 - (sd - 6) * (100 / 14))))
 
 
-def metrics(color="white"):
+def metrics(color="white", user_id=""):
     """Per-side behavior metrics over all reviewed games (aimchess-style stats)."""
     me = "white" if (color or "white").lower() != "black" else "black"
     opp = "black" if me == "white" else "white"
@@ -471,7 +505,8 @@ def metrics(color="white"):
         conn = _connect()
         rows = conn.execute(
             "SELECT g.result, r.moves_json, r.white_acc, r.black_acc FROM games g"
-            " JOIN reviews r ON r.game_id = g.id").fetchall()
+            " JOIN reviews r ON r.game_id = g.id WHERE g.user_id = ?",
+            (user_id,)).fetchall()
     for result, mvj, wacc, bacc in rows:
         games_count += 1
         try:
@@ -535,7 +570,8 @@ def metrics(color="white"):
     phase = None
     with _lock:
         conn = _connect()
-        p_rows = conn.execute("SELECT phase_json FROM reviews").fetchall()
+        p_rows = conn.execute("SELECT phase_json FROM reviews WHERE user_id = ?",
+                              (user_id,)).fetchall()
     for (pj,) in p_rows:
         try:
             d = json.loads(pj or "{}")
@@ -588,7 +624,7 @@ def metrics(color="white"):
     }
 
 
-def skill_series(color="white"):
+def skill_series(color="white", user_id=""):
     """Per-game skill series for the Lab tiles (aimchess-style line charts).
 
     Each skill is one value per reviewed game (date-sorted), so the tiles draw
@@ -609,7 +645,8 @@ def skill_series(color="white"):
         rows = conn.execute(
             "SELECT g.date_ts, g.date, g.result, r.phase_json, r.moves_json,"
             " r.white_acc, r.black_acc FROM games g JOIN reviews r ON r.game_id = g.id"
-            " GROUP BY g.id ORDER BY g.date_ts, g.created_at").fetchall()
+            " WHERE g.user_id = ?"
+            " GROUP BY g.id ORDER BY g.date_ts, g.created_at", (user_id,)).fetchall()
     for date_ts, date, result, pjk, mvj, wacc, bacc in rows:
         wdl["total"] += 1
         if result == win_key:
@@ -664,34 +701,43 @@ def skill_series(color="white"):
     return {"color": me, "wdl": wdl, "skills": out}
 
 
-def overall():
+def overall(user_id=""):
     with _lock:
         conn = _connect()
-        total = conn.execute("SELECT COUNT(*) FROM games").fetchone()[0]
-        wl = conn.execute("SELECT result, COUNT(*) FROM games GROUP BY result").fetchall()
+        total = conn.execute("SELECT COUNT(*) FROM games WHERE user_id = ?", (user_id,)).fetchone()[0]
+        wl = conn.execute("SELECT result, COUNT(*) FROM games WHERE user_id = ? GROUP BY result",
+                          (user_id,)).fetchall()
         by_color = dict(wl)
         tc = conn.execute(
-            "SELECT tc_bucket, result, COUNT(*) FROM games WHERE tc_bucket != 'unknown'"
-            " GROUP BY tc_bucket, result").fetchall()
+            "SELECT tc_bucket, result, COUNT(*) FROM games WHERE user_id = ?"
+            " AND tc_bucket != 'unknown'"
+            " GROUP BY tc_bucket, result", (user_id,)).fetchall()
         monthly = conn.execute(
             "SELECT strftime('%Y-%m', date_ts, 'unixepoch'), COUNT(*),"
             " SUM(CASE WHEN result = '1-0' THEN 1 ELSE 0 END),"
             " SUM(CASE WHEN result = '0-1' THEN 1 ELSE 0 END),"
             " SUM(CASE WHEN result = '1/2-1/2' THEN 1 ELSE 0 END)"
-            " FROM games WHERE date_ts > 0 GROUP BY 1 ORDER BY 1").fetchall()
+            " FROM games WHERE user_id = ? AND date_ts > 0 GROUP BY 1 ORDER BY 1",
+            (user_id,)).fetchall()
         rating_pool = conn.execute(
             "SELECT AVG(CASE WHEN white_elo IS NOT NULL AND black_elo IS NOT NULL"
-            " THEN (white_elo + black_elo) / 2.0 END) FROM games").fetchone()[0]
-        avg_ply = conn.execute("SELECT AVG(ply_count) FROM games").fetchone()[0]
+            " THEN (white_elo + black_elo) / 2.0 END) FROM games WHERE user_id = ?",
+            (user_id,)).fetchone()[0]
+        avg_ply = conn.execute("SELECT AVG(ply_count) FROM games WHERE user_id = ?",
+                               (user_id,)).fetchone()[0]
         openings = conn.execute(
-            "SELECT opening, result, COUNT(*) FROM games GROUP BY opening, result").fetchall()
+            "SELECT opening, result, COUNT(*) FROM games WHERE user_id = ? GROUP BY opening, result",
+            (user_id,)).fetchall()
         acc = conn.execute(
             "SELECT AVG(white_acc), AVG(black_acc), AVG(white_acpl), AVG(black_acpl),"
             " SUM(blunders), SUM(mistakes), SUM(inaccuracies), SUM(misses),"
-            " SUM(brilliant), SUM(great) FROM reviews").fetchone()
-        reviewed_count = conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
+            " SUM(brilliant), SUM(great) FROM reviews WHERE user_id = ?",
+            (user_id,)).fetchone()
+        reviewed_count = conn.execute("SELECT COUNT(*) FROM reviews WHERE user_id = ?",
+                                      (user_id,)).fetchone()[0]
         phase_rows = conn.execute(
-            "SELECT r.phase_json FROM games g JOIN reviews r ON r.game_id = g.id").fetchall()
+            "SELECT r.phase_json FROM games g JOIN reviews r ON r.game_id = g.id"
+            " WHERE g.user_id = ?", (user_id,)).fetchall()
 
         def _avg_ph(name):
             vals = []
@@ -701,7 +747,10 @@ def overall():
                 except Exception:
                     continue
                 for side in ((d2.get("white") or {}), (d2.get("black") or {})):
-                    pa = (side.get(name) or {}).get("accuracy") if isinstance(side, dict) else None
+                    if not isinstance(side, dict):
+                        continue
+                    ph = side.get(name)
+                    pa = ph.get("accuracy") if isinstance(ph, dict) else None
                     if isinstance(pa, (int, float)):
                         vals.append(pa)
             return round(sum(vals) / len(vals), 1) if vals else None
@@ -760,7 +809,7 @@ def overall():
     }
 
 
-def games_by_id(ids):
+def games_by_id(ids, user_id=""):
     ids = [str(i) for i in (ids or []) if i][:500]
     if not ids:
         return []
@@ -770,54 +819,72 @@ def games_by_id(ids):
         rows = conn.execute(
             "SELECT id, fen, white, black, white_elo, black_elo, result, date, date_ts,"
             " time_control, tc_bucket, opening, eco, ply_count, source, reviewed"
-            " FROM games WHERE id IN (" + placeholders + ")", ids).fetchall()
+            " FROM games WHERE user_id = ? AND id IN (" + placeholders + ")",
+            [user_id] + ids).fetchall()
     return [_row(None, r) for r in rows]
 
 
-def delete_game(gid):
+def delete_game(gid, user_id=""):
     """Remove a game AND its review (cascade is enforced by FK pragma + explicit delete)."""
     with _lock:
         conn = _connect()
         conn.execute("BEGIN")
-        conn.execute("DELETE FROM reviews WHERE game_id = ?", (gid,))
-        cur = conn.execute("DELETE FROM games WHERE id = ?", (gid,))
+        conn.execute("DELETE FROM reviews WHERE game_id = ? AND user_id = ?", (gid, user_id))
+        cur = conn.execute("DELETE FROM games WHERE id = ? AND user_id = ?", (gid, user_id))
         conn.commit()
     return cur.rowcount > 0
 
 
-def add_alias(alias, canonical):
+def add_alias(alias, canonical, user_id=""):
+    alias, canonical = alias.strip(), canonical.strip()
     with _lock:
         conn = _connect()
-        conn.execute("INSERT OR IGNORE INTO aliases(alias, canonical) VALUES (?,?)",
-                     (alias.strip(), canonical.strip()))
+        row = conn.execute("SELECT 1 FROM aliases WHERE alias = ? COLLATE NOCASE AND user_id = ?",
+                           (alias, user_id)).fetchone()
+        if row:
+            conn.execute("UPDATE aliases SET canonical = ? WHERE alias = ? COLLATE NOCASE AND user_id = ?",
+                         (canonical, alias, user_id))
+        else:
+            try:
+                conn.execute("INSERT INTO aliases(alias, canonical, user_id) VALUES (?,?,?)",
+                             (alias, canonical, user_id))
+            except sqlite3.IntegrityError:
+                # pre-accounts databases still carry UNIQUE(alias); another
+                # account owns that name — leave their mapping untouched
+                pass
         conn.commit()
     return {"ok": True}
 
 
-def list_aliases():
+def list_aliases(user_id=""):
     with _lock:
         conn = _connect()
-        rows = conn.execute("SELECT alias, canonical FROM aliases ORDER BY canonical, alias").fetchall()
+        rows = conn.execute("SELECT alias, canonical FROM aliases WHERE user_id = ?"
+                            " ORDER BY canonical, alias", (user_id,)).fetchall()
     return [{"alias": r[0], "canonical": r[1]} for r in rows]
 
 
-def remove_alias(alias):
+def remove_alias(alias, user_id=""):
     with _lock:
         conn = _connect()
-        cur = conn.execute("DELETE FROM aliases WHERE alias = ?", (alias.strip(),))
+        cur = conn.execute("DELETE FROM aliases WHERE alias = ? AND user_id = ?",
+                           (alias.strip(), user_id))
         conn.commit()
     return cur.rowcount > 0
 
 
-def normalize_aliases():
+def normalize_aliases(user_id=""):
     with _lock:
         conn = _connect()
-        rows = conn.execute("SELECT alias, canonical FROM aliases").fetchall()
+        rows = conn.execute("SELECT alias, canonical FROM aliases WHERE user_id = ?",
+                            (user_id,)).fetchall()
         try:
             conn.execute("BEGIN")
             for a, c in rows:
-                conn.execute("UPDATE games SET white = ? WHERE white = ? COLLATE NOCASE", (c, a))
-                conn.execute("UPDATE games SET black = ? WHERE black = ? COLLATE NOCASE", (c, a))
+                conn.execute("UPDATE games SET white = ? WHERE white = ? COLLATE NOCASE AND user_id = ?",
+                             (c, a, user_id))
+                conn.execute("UPDATE games SET black = ? WHERE black = ? COLLATE NOCASE AND user_id = ?",
+                             (c, a, user_id))
             conn.commit()
         except Exception:
             conn.rollback()
@@ -825,30 +892,32 @@ def normalize_aliases():
     return {"ok": True, "aliasesApplied": len(rows)}
 
 
-def _reviews_only_count():
+def _reviews_only_count(user_id=""):
     with _lock:
         conn = _connect()
-        return conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
+        return conn.execute("SELECT COUNT(*) FROM reviews WHERE user_id = ?",
+                            (user_id,)).fetchone()[0]
 
 
-def weaknesses():
+def weaknesses(user_id=""):
     """Rule-based weakness fingerprint. Each rule fires on REAL rows; severity &
     confidence derive from raw counts with explicit thresholds."""
     findings = []
     with _lock:
         conn = _connect()
-        rev_count = conn.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
+        rev_count = conn.execute("SELECT COUNT(*) FROM reviews WHERE user_id = ?",
+                                 (user_id,)).fetchone()[0]
         if rev_count == 0:
             return {"reviewedGames": 0, "weaknesses": [], "note": "No reviewed games yet — review some games to unlock weakness analysis."}
 
         def aggregate(sql):
-            return conn.execute(sql).fetchall()
+            return conn.execute(sql, (user_id,)).fetchall()
 
         # ---- rule 1: misses (had a winning chance and failed to convert)
         miss_rows = aggregate(
             "SELECT g.id, g.white, g.black, g.result, g.date, g.ply_count "
             "FROM games g JOIN reviews r ON r.game_id = g.id "
-            "WHERE r.misses > 0 ORDER BY g.date_ts DESC")
+            "WHERE g.user_id = ? AND r.misses > 0 ORDER BY g.date_ts DESC")
         if miss_rows:
             n = len(miss_rows)
             conf = "high" if n >= 5 else ("medium" if n >= 2 else "low")
@@ -865,7 +934,8 @@ def weaknesses():
         blunder_better_ids = []
         try:
             for row in conn.execute(
-                "SELECT g.id, r.moves_json FROM games g JOIN reviews r ON r.game_id = g.id"):
+                "SELECT g.id, r.moves_json FROM games g JOIN reviews r ON r.game_id = g.id"
+                " WHERE g.user_id = ?", (user_id,)):
                 mid, mvj = row
                 try:
                     mvs = json.loads(mvj or "[]")
@@ -892,7 +962,7 @@ def weaknesses():
         # ---- rule 3: time-pressure mistakes
         time_err = aggregate(
             "SELECT t.time_json FROM games g JOIN reviews t ON t.game_id = g.id"
-            " WHERE t.time_json IS NOT NULL AND t.time_json != '{}'")
+            " WHERE g.user_id = ? AND t.time_json IS NOT NULL AND t.time_json != '{}'")
         time_errs = 0
         for (tj,) in time_err:
             try:
@@ -913,7 +983,8 @@ def weaknesses():
 
         # ---- rule 4: phase leak (opening/mid/end accuracy diff)
         phase_rows = aggregate(
-            "SELECT g.id, r.phase_json FROM games g JOIN reviews r ON r.game_id = g.id")
+            "SELECT g.id, r.phase_json FROM games g JOIN reviews r ON r.game_id = g.id"
+            " WHERE g.user_id = ?")
         phase_acc = {"opening": [], "middlegame": [], "endgame": []}
         phase_ids = {"opening": [], "middlegame": [], "endgame": []}
         for gid, pj in phase_rows:
@@ -961,7 +1032,8 @@ def weaknesses():
         conv_fail_ids = []
         try:
             for row in conn.execute(
-                "SELECT g.id, g.result, r.moves_json FROM games g JOIN reviews r ON r.game_id = g.id"):
+                "SELECT g.id, g.result, r.moves_json FROM games g JOIN reviews r ON r.game_id = g.id"
+                " WHERE g.user_id = ?", (user_id,)):
                 gid, res, mvj = row
                 try:
                     mvs = json.loads(mvj or "[]")
@@ -1008,8 +1080,8 @@ def weaknesses():
         }
 
 
-def recommendations():
-    w = weaknesses()
+def recommendations(user_id=""):
+    w = weaknesses(user_id)
     findings = w.get("weaknesses", [])
     recs = []
     severity_rank = {"high": 2, "medium": 1, "low": 0}
@@ -1066,7 +1138,7 @@ def recommendations():
     # augment with trainer-specific weak categories (from the trainer DB - real data)
     try:
         from server import trainer as T
-        dash = T.dashboard()
+        dash = T.dashboard(user_id=user_id)
         weakest = (dash.get("weakCategories") or [{}])[0] if dash.get("weakCategories") else None
         if weakest:
             recs.append({
@@ -1092,7 +1164,7 @@ def recommendations():
     return {"reviewedGames": w.get("reviewedGames", 0), "recommendations": recs}
 
 
-def timeline():
+def timeline(user_id=""):
     with _lock:
         conn = _connect()
         monthly = conn.execute(
@@ -1100,13 +1172,15 @@ def timeline():
             " SUM(CASE WHEN result='1-0' THEN 1 ELSE 0 END),"
             " SUM(CASE WHEN result='0-1' THEN 1 ELSE 0 END),"
             " SUM(CASE WHEN result='1/2-1/2' THEN 1 ELSE 0 END)"
-            " FROM games WHERE date_ts > 0 GROUP BY 1 ORDER BY 1").fetchall()
+            " FROM games WHERE user_id = ? AND date_ts > 0 GROUP BY 1 ORDER BY 1",
+            (user_id,)).fetchall()
         monthly_acc = conn.execute(
             "SELECT strftime('%Y-%m', g.date_ts, 'unixepoch'),"
             " AVG(CASE WHEN g.reviewed = 1 THEN r.white_acc END),"
             " AVG(CASE WHEN g.reviewed = 1 THEN r.black_acc END)"
             " FROM games g LEFT JOIN reviews r ON r.game_id = g.id"
-            " WHERE g.date_ts > 0 GROUP BY 1 ORDER BY 1").fetchall()
+            " WHERE g.user_id = ? AND g.date_ts > 0 GROUP BY 1 ORDER BY 1",
+            (user_id,)).fetchall()
     acc_map = {m: (aw, ab) for m, aw, ab in monthly_acc}
     points = []
     for m, n, w, l, d in monthly:
@@ -1121,12 +1195,13 @@ def timeline():
     return {"points": points}
 
 
-def openings_report():
+def openings_report(user_id=""):
     with _lock:
         conn = _connect()
         rows = conn.execute(
             "SELECT eco, opening, white, black, result, date_ts"
-            " FROM games WHERE opening != '' OR eco != ''").fetchall()
+            " FROM games WHERE user_id = ? AND (opening != '' OR eco != '')",
+            (user_id,)).fetchall()
     fam = {}
     for eco, op, white, black, result, date_ts in rows:
         key = (eco or "?")
