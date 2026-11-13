@@ -82,33 +82,102 @@ def analyse_position(engine, board, depth, multipv, movetime=None):
     return {"cp": top["cp"], "mate": top.get("mate"), "lines": lines}
 
 
+def _capture_value(board, move):
+    """(is_capture, value_in_pawns) for `move` in `board` (before it is pushed)."""
+    if not board.is_capture(move):
+        return False, 0
+    if board.is_en_passant(move):
+        pt = chess.PAWN
+    else:
+        pt = board.piece_type_at(move.to_square)
+    return True, PIECE_VAL.get(pt, 0)
+
+
+def _was_hanging(board_before, sq, mover):
+    """True if the mover's piece standing on `sq` BEFORE the move was already
+    capturable at a gain (attacked by a strictly cheaper piece). Pieces the
+    move itself put en prise are not pre-hanging, and a defender that moved
+    away makes the piece attributable to the move."""
+    pt = board_before.piece_type_at(sq)
+    if pt is None or board_before.color_at(sq) != mover:
+        return False
+    att = board_before.attackers(not mover, sq)
+    if not att:
+        return False
+    cheapest = min(PIECE_VAL[board_before.piece_type_at(a)] for a in att)
+    return cheapest < PIECE_VAL[pt]
+
+
 def detect_sacrifice(board_before, move, next_pos):
-    """Net material (mover minus opponent, in pawns) the mover gives up across the
-    opponent's best reply and the mover's expected follow-up.
+    """Net material (in pawns) the played move itself throws away across the
+    opponent's best reply and the mover's expected follow-up: the value of the
+    mover's pieces captured in that window MINUS what the mover captures back,
+    EXCLUDING pieces that were already capturable before the move.
 
-    Measuring the *balance* (not just the mover's pieces) is essential: an even
-    trade like Bxc6 dxc6 must return ~0, otherwise every normal capture looks
-    like a 3-point sacrifice."""
+    The old balance-difference version measured a two-sided swing (a captured
+    piece counted twice: lost by the mover AND gained by the opponent) and
+    inherited the previous move's blunders, so leaving an already-hanging
+    piece - or even losing two pawns unrecaptured - flagged as a 'sacrifice'.
+    That produced false brilliants; the one-sided attribution matches the
+    meaning of 'sacrifice' (chess.com-style)."""
     mover = board_before.turn
-
-    def balance(bd):
-        return material(bd, mover) - material(bd, not mover)
-
-    b = board_before.copy(stack=False)
-    b.push(move)
-    pv = next_pos.get("lines") or []
-    if pv:
+    bd = board_before.copy(stack=False)
+    seq = [move]
+    bd.push(move)   # the reply is only legal on the post-move board
+    pv = (next_pos.get("lines") or [{}])[0].get("pv") or []
+    for u in pv[:2]:
         try:
-            first = chess.Move.from_uci(pv[0]["pv"][0])
-            if first in b.legal_moves:
-                b.push(first)
-                if len(pv[0]["pv"]) > 1:
-                    second = chess.Move.from_uci(pv[0]["pv"][1])
-                    if second in b.legal_moves:
-                        b.push(second)
+            mv = chess.Move.from_uci(u)
+        except Exception:
+            break
+        if mv not in bd.legal_moves:
+            break
+        seq.append(mv)
+        bd.push(mv)
+
+    lost_own = 0    # mover material captured that THIS move put at risk
+    gained = 0      # opponent material the mover captures in the window
+    bd = board_before.copy(stack=False)
+    for mv in seq:
+        is_cap, val = _capture_value(bd, mv)
+        if is_cap:
+            if bd.turn == mover:
+                gained += val
+            else:
+                cap_sq = (chess.square(chess.square_file(mv.to_square),
+                                       chess.square_rank(mv.from_square))
+                          if bd.is_en_passant(mv) else mv.to_square)
+                if not _was_hanging(board_before, cap_sq, mover):
+                    lost_own += val
+        bd.push(mv)
+    return max(0, lost_own - gained)
+
+
+def piece_offer(board_before, move, next_pos):
+    """Value of a genuine QUIET piece offer: after the move, the moved piece is
+    attacked by a strictly cheaper piece - a real material concession even if
+    the opponent's best reply declines the capture (those brilliancies used to
+    fall through to 'best'). Offers the opponent immediately recaptures are
+    accounted by detect_sacrifice instead, which nets the trade correctly."""
+    mover = board_before.turn
+    bd = board_before.copy(stack=False)
+    bd.push(move)
+    pt = bd.piece_type_at(move.to_square)
+    if pt is None or pt in (chess.PAWN, chess.KING):
+        return 0
+    att = bd.attackers(not mover, move.to_square)
+    if not att:
+        return 0
+    pv = (next_pos.get("lines") or [{}])[0].get("pv") or []
+    if pv and pv[0]:
+        try:
+            reply = chess.Move.from_uci(pv[0])
+            if reply in bd.legal_moves and bd.is_capture(reply) and reply.to_square == move.to_square:
+                return 0   # taken at once: the sac path nets this correctly
         except Exception:
             pass
-    return balance(board_before) - balance(b)
+    cheapest = min(PIECE_VAL[bd.piece_type_at(a)] for a in att)
+    return PIECE_VAL[pt] if cheapest < PIECE_VAL[pt] else 0
 
 
 def classify_move(move, board_before, pos, next_pos, legal_count, is_book):
@@ -193,9 +262,15 @@ def classify_move(move, board_before, pos, next_pos, legal_count, is_book):
 
     if is_best and not mated_now:
         sac = detect_sacrifice(board_before, move, next_pos)
+        offer = piece_offer(board_before, move, next_pos)
         second_win = A.win_percent(clamp_cp(second_cp)) if second_cp is not None else None
-        if sac >= 2 and win_a >= 38 and win_a >= win_b - 10 and (
-                second_win is None or second_win <= win_b - 12 or played_uci == best_uci):
+        # Brilliant (chess.com-style, v83): the engine's TOP choice AND a real,
+        # one-sided material investment - either a sacrifice the best reply
+        # cannot simply win back, or a quiet piece offer the best line
+        # declines. Strictly the top move: the old gate's "second-best is much
+        # worse" hedge is what produced the false brilliants.
+        is_top = played_uci == best_uci
+        if (sac >= 2 or offer >= 3) and is_top and win_a >= 30 and win_a >= win_b - 10:
             return "brilliant", loss, epl, drop, win_b, win_a, best_uci
         if loss <= 25 and second_win is not None and second_win <= win_b - 15 and win_a >= win_b - 8:
             return "great", loss, epl, drop, win_b, win_a, best_uci
@@ -611,6 +686,6 @@ def run_review(pgn_text, engine, depth=12, multipv=3, movetime=900, progress=Non
         "graph": graph,
         "annotatedPgn": annotated_pgn,
         "pgnWarnings": pgn_warnings,
-        "analysis": {"accV": 2, "engine": getattr(engine, "name", "?"), "depth": depth,
+        "analysis": {"accV": 2, "clsV": 2, "engine": getattr(engine, "name", "?"), "depth": depth,
                      "multipv": multipv, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")},
     }
