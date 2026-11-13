@@ -14,8 +14,13 @@ import threading
 import time
 from pathlib import Path
 
+try:
+    from server import db
+except ImportError:
+    import db  # type: ignore
+
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "training.db"
-_lock = threading.Lock()   # every mutation is serialized through here
+_lock = threading.RLock()   # every mutation is serialized through here
 _conn = None
 
 EXTRACT_CLASSES = {"blunder": 3, "miss": 2, "mistake": 1}
@@ -34,7 +39,7 @@ def _connect():
     global _conn
     if _conn is None:
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        conn = db.connect("trainer", DB_PATH)
         conn.execute("""CREATE TABLE IF NOT EXISTS exercises (
             id TEXT PRIMARY KEY,
             fen TEXT NOT NULL,
@@ -55,9 +60,11 @@ def _connect():
             source_date TEXT DEFAULT '', opening TEXT DEFAULT '', eco TEXT DEFAULT '',
             move_number INTEGER, ply INTEGER,
             first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL,
-            removed INTEGER NOT NULL DEFAULT 0)""")
+            removed INTEGER NOT NULL DEFAULT 0,
+            user_id TEXT NOT NULL DEFAULT '')""")
         conn.execute("""CREATE TABLE IF NOT EXISTS exercise_sources (
             ex_id TEXT NOT NULL, source_id TEXT NOT NULL, occurrences INTEGER NOT NULL DEFAULT 1,
+            user_id TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (ex_id, source_id))""")
         conn.execute("""CREATE TABLE IF NOT EXISTS attempts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +74,8 @@ def _connect():
             solved INTEGER NOT NULL,
             auto INTEGER NOT NULL DEFAULT 0,
             ms INTEGER DEFAULT 0,
-            attempted_at INTEGER NOT NULL)""")
+            attempted_at INTEGER NOT NULL,
+            user_id TEXT NOT NULL DEFAULT '')""")
         conn.execute("""CREATE TABLE IF NOT EXISTS schedule (
             ex_id TEXT PRIMARY KEY REFERENCES exercises(id) ON DELETE CASCADE,
             ease REAL NOT NULL DEFAULT 2.5,
@@ -79,7 +87,8 @@ def _connect():
             total_correct INTEGER NOT NULL DEFAULT 0,
             total_attempts INTEGER NOT NULL DEFAULT 0,
             last_grade INTEGER, last_at INTEGER,
-            suspended INTEGER NOT NULL DEFAULT 0)""")
+            suspended INTEGER NOT NULL DEFAULT 0,
+            user_id TEXT NOT NULL DEFAULT '')""")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sched_due ON schedule(due_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ex_cls ON exercises(cls)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ex_src ON exercises(source_id)")
@@ -87,6 +96,15 @@ def _connect():
         cols = {r[1] for r in conn.execute("PRAGMA table_info(exercises)")}
         if "lines_json" not in cols:
             conn.execute("ALTER TABLE exercises ADD COLUMN lines_json TEXT DEFAULT '[]'")
+        # accounts: per-user scoping columns (old rows stay in the guest pool)
+        for tbl in ("exercises", "exercise_sources", "attempts", "schedule"):
+            tcols = {r[1] for r in conn.execute("PRAGMA table_info(%s)" % tbl)}
+            if "user_id" not in tcols:
+                conn.execute("ALTER TABLE %s ADD COLUMN user_id TEXT NOT NULL DEFAULT ''" % tbl)
+        # the per-user indexes come AFTER the migration: on an older database
+        # the column does not exist yet and CREATE INDEX would fail
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_ex_user ON exercises(user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_att_user ON attempts(user_id)")
         conn.commit()
         _conn = conn
     return _conn
@@ -99,6 +117,23 @@ def init_db():
     except Exception as e:
         print(f"[trainer] init failed: {e}")
         return False
+
+
+# ---------------------------------------------------------------- id scoping
+def _ex_id(raw_id, user_id=""):
+    """Exercise ids are content hashes; they are prefixed per account so two
+    users can train the same position without colliding on the PK. The client
+    only ever sees the raw hash."""
+    raw = (raw_id or "").strip()
+    return f"{user_id}:{raw}" if user_id else raw
+
+
+def _public_id(db_id, user_id=""):
+    """Strip the account prefix so the client sees plain hashes again."""
+    s = db_id or ""
+    if user_id and s.startswith(user_id + ":"):
+        return s[len(user_id) + 1:]
+    return s
 
 
 # ---------------------------------------------------------------- extraction
@@ -182,7 +217,7 @@ def extract_from_review(res):
 
 
 # ---------------------------------------------------------------- upsert / dedupe
-def sync_exercises(exercise_list):
+def sync_exercises(exercise_list, user_id=""):
     """Idempotent insert-or-get. Worst severity class wins on conflicts."""
     counts = {"created": 0, "updated": 0, "skipped": 0}
     now = int(time.time())
@@ -191,23 +226,24 @@ def sync_exercises(exercise_list):
         try:
             conn.execute("BEGIN")
             for ex in exercise_list:
+                exid = _ex_id(ex["id"], user_id)
                 try:
                     cur = conn.execute(
-                        "SELECT cls FROM exercises WHERE id = ? AND removed = 0",
-                        (ex["id"],)).fetchone()
+                        "SELECT cls FROM exercises WHERE id = ? AND removed = 0 AND user_id = ?",
+                        (exid, user_id)).fetchone()
                     if cur:
                         sev_saved, sev_new = SEV.get(cur[0], 0), SEV.get(ex["cls"], 0)
                         if sev_new > sev_saved:
                             conn.execute(
-                                "UPDATE exercises SET cls=?, label=?, last_seen=? WHERE id=?",
-                                (ex["cls"], ex["label"], now, ex["id"]))
+                                "UPDATE exercises SET cls=?, label=?, last_seen=? WHERE id=? AND user_id=?",
+                                (ex["cls"], ex["label"], now, exid, user_id))
                         else:
-                            conn.execute("UPDATE exercises SET last_seen=? WHERE id=?",
-                                         (now, ex["id"]))
+                            conn.execute("UPDATE exercises SET last_seen=? WHERE id=? AND user_id=?",
+                                         (now, exid, user_id))
                         conn.execute(
-                            "INSERT INTO exercise_sources(ex_id, source_id, occurrences) VALUES (?,?,1) "
+                            "INSERT INTO exercise_sources(ex_id, source_id, occurrences, user_id) VALUES (?,?,1,?) "
                             "ON CONFLICT(ex_id, source_id) DO NOTHING",
-                            (ex["id"], ex["sourceId"]))
+                            (exid, ex["sourceId"], user_id))
                         counts["updated"] += 1
                         continue
                     src = {k: v for k, v in ex.items() if k in (
@@ -218,9 +254,9 @@ def sync_exercises(exercise_list):
                         "cls, label, cp_before, cp_after, win_before, win_after, loss, accuracy_cp,"
                         "pv_san, best_cp, best_mate, lines_json,"
                         "source_id, source_name, source_date, opening, eco,"
-                        "move_number, ply, first_seen, last_seen) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                        (ex["id"], ex["fen"], ex["turn"], ex["color_side"],
+                        "move_number, ply, first_seen, last_seen, user_id) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (exid, ex["fen"], ex["turn"], ex["color_side"],
                          ex["played_uci"], ex["played_san"], ex["best_uci"], ex["best_san"],
                          ex["cls"], ex["label"],
                          src.get("cpBefore"), src.get("cpAfter"), src.get("winBefore"),
@@ -231,14 +267,14 @@ def sync_exercises(exercise_list):
                          ex["sourceId"], ex["sourceName"], ex["sourceDate"],
                          ex["opening"], ex["eco"],
                          ex.get("moveNumber"), ex.get("ply"),
-                         ex["firstSeen"], ex["lastSeen"]))
+                         ex["firstSeen"], ex["lastSeen"], user_id))
                     conn.execute(
-                        "INSERT INTO exercise_sources(ex_id, source_id, occurrences) VALUES (?,?,1) "
+                        "INSERT INTO exercise_sources(ex_id, source_id, occurrences, user_id) VALUES (?,?,1,?) "
                         "ON CONFLICT(ex_id, source_id) DO NOTHING",
-                        (ex["id"], ex["sourceId"]))
+                        (exid, ex["sourceId"], user_id))
                     conn.execute(
-                        "INSERT OR IGNORE INTO schedule(ex_id, due_at) VALUES (?, ?)",
-                        (ex["id"], now))
+                        "INSERT OR IGNORE INTO schedule(ex_id, due_at, user_id) VALUES (?, ?, ?)",
+                        (exid, now, user_id))
                     counts["created"] += 1
                 except Exception as e:
                     print(f"[trainer] exercise skipped ({ex.get('id')}): {e}")
@@ -301,16 +337,17 @@ def _parse_filters(args):
     return f
 
 
-def _filters_sql(f, table="exercises"):
+def _filters_sql(f, table="exercises", user_id=""):
     """Returns (sql_fragments, params) - safe parameter binding only."""
-    parts, params = ["removed = 0"], []
+    parts, params = [f"{table}.user_id = ?"], [user_id]
+    parts.append("removed = 0")
     if "cls" in f:
         parts.append("cls = ?"); params.append(f["cls"])
     if "color_side" in f:
         parts.append("color_side = ?"); params.append(f["color_side"])
     if "source_id" in f:
-        parts.append(f"EXISTS (SELECT 1 FROM exercise_sources s WHERE s.ex_id = {table}.id AND s.source_id = ?)")
-        params.append(f["source_id"])
+        parts.append(f"EXISTS (SELECT 1 FROM exercise_sources s WHERE s.ex_id = {table}.id AND s.source_id = ? AND s.user_id = ?)")
+        params.append(f["source_id"]); params.append(user_id)
     if "status" in f:
         if f["status"] == "due":
             parts.append("schedule.due_at <= ? AND schedule.status != 'new'")
@@ -321,7 +358,7 @@ def _filters_sql(f, table="exercises"):
     return " AND ".join(parts), params
 
 
-def next_queue(limit=8, filters=None, include_new=True):
+def next_queue(limit=8, filters=None, include_new=True, user_id=""):
     """Pick ORDER: overdue (oldest first), then new (bounded)."""
     filters = filters or {}
     now = int(time.time())
@@ -329,7 +366,7 @@ def next_queue(limit=8, filters=None, include_new=True):
     result = []
     with _lock:
         conn = _connect()
-        wsql, wparams = _filters_sql(filters, "exercises")
+        wsql, wparams = _filters_sql(filters, "exercises", user_id)
         # 1) due learning/review/mastered
         rows = conn.execute(
             f"SELECT exercises.id, exercises.fen, exercises.turn, exercises.color_side,"
@@ -343,7 +380,7 @@ def next_queue(limit=8, filters=None, include_new=True):
             f" WHERE {wsql} AND schedule.status != 'new' AND schedule.due_at <= ? AND schedule.suspended = 0"
             f" ORDER BY schedule.due_at ASC LIMIT ?",
             (*wparams, now, limit)).fetchall()
-        result += [_row_to_card(r) for r in rows]
+        result += [_row_to_card(r, user_id) for r in rows]
         if len(result) < limit and include_new:
             new_cap = max(0, min(6, limit - len(result)))
             rows2 = conn.execute(
@@ -358,13 +395,13 @@ def next_queue(limit=8, filters=None, include_new=True):
                 f" WHERE {wsql} AND schedule.status = 'new' AND schedule.suspended = 0"
                 f" ORDER BY exercises.first_seen ASC LIMIT ?",
                 (*wparams, new_cap)).fetchall()
-            result += [_row_to_card(r) for r in rows2]
+            result += [_row_to_card(r, user_id) for r in rows2]
     return result
 
 
-def _row_to_card(r):
+def _row_to_card(r, user_id=""):
     return {
-        "id": r[0], "fen": r[1], "turn": r[2], "colorSide": r[3],
+        "id": _public_id(r[0], user_id), "fen": r[1], "turn": r[2], "colorSide": r[3],
         "playedUci": r[4], "playedSan": r[5], "bestUci": r[6], "bestSan": r[7],
         "cls": r[8], "label": r[9], "cpBefore": r[10], "cpAfter": r[11],
         "winBefore": r[12], "winAfter": r[13], "loss": r[14],
@@ -378,27 +415,30 @@ def _row_to_card(r):
     }
 
 
-def record_attempt(ex_id, quality, played_uci="", ms=0):
+def record_attempt(ex_id, quality, played_uci="", ms=0, user_id=""):
     """Validate + grade an attempt atomically. quality in 0|2|4|5."""
     quality = int(quality)
     if quality not in (0, 2, 4, 5):
         raise ValueError("quality must be one of 0,2,4,5")
     solved = 1 if quality > 0 else 0
     now = int(time.time())
+    exid = _ex_id(ex_id, user_id)
     with _lock:
         conn = _connect()
-        cur = conn.execute("SELECT 1 FROM exercises WHERE id = ? AND removed = 0", (ex_id,)).fetchone()
+        cur = conn.execute(
+            "SELECT 1 FROM exercises WHERE id = ? AND removed = 0 AND user_id = ?",
+            (exid, user_id)).fetchone()
         if not cur:
             raise ValueError("unknown exercise")
         try:
             conn.execute("BEGIN")
             conn.execute(
-                "INSERT INTO attempts(ex_id, quality, played_uci, solved, ms, attempted_at)"
-                " VALUES (?,?,?,?,?,?)",
-                (ex_id, quality, played_uci or "", solved, int(ms or 0), now))
+                "INSERT INTO attempts(ex_id, quality, played_uci, solved, ms, attempted_at, user_id)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (exid, quality, played_uci or "", solved, int(ms or 0), now, user_id))
             row = conn.execute(
                 "SELECT ease, interval_days, reps, lapses, total_correct, total_attempts"
-                " FROM schedule WHERE ex_id = ?", (ex_id,)).fetchone()
+                " FROM schedule WHERE ex_id = ?", (exid,)).fetchone()
             ease, interval, reps, lapses, tcorr, ttot = row if row else (EASE_DEFAULT, 0, 0, 0, 0, 0)
             ease2, interval2, reps2, status2 = _grade_interval(ease, interval, reps, quality)
             lapses2 = lapses + (1 if quality == 0 else 0)
@@ -407,7 +447,7 @@ def record_attempt(ex_id, quality, played_uci="", ms=0):
                 "UPDATE schedule SET ease=?, interval_days=?, due_at=?, status=?, reps=?, lapses=?,"
                 " total_correct=?, total_attempts=?, last_grade=?, last_at=? WHERE ex_id=?",
                 (ease2, interval2, due_at, status2, reps2, lapses2,
-                 tcorr + (1 if solved else 0), ttot + 1, quality, now, ex_id))
+                 tcorr + (1 if solved else 0), ttot + 1, quality, now, exid))
             conn.commit()
         except Exception:
             conn.rollback()
@@ -416,12 +456,12 @@ def record_attempt(ex_id, quality, played_uci="", ms=0):
             "status": status2, "reps": reps2, "lapses": lapses2, "dueAt": due_at}
 
 
-def dashboard(filters=None):
+def dashboard(filters=None, user_id=""):
     filters = filters or {}
     now = int(time.time())
     with _lock:
         conn = _connect()
-        wsql, wparams = _filters_sql(filters, "exercises")
+        wsql, wparams = _filters_sql(filters, "exercises", user_id)
         base_sql = f"FROM exercises JOIN schedule ON schedule.ex_id = exercises.id WHERE {wsql}"
 
         def one(sql, p=()):
@@ -437,23 +477,29 @@ def dashboard(filters=None):
         mastered = conn.execute(f"SELECT COUNT(*) {base_sql} AND schedule.status = 'mastered'", wparams).fetchone()[0]
         new_count = conn.execute(f"SELECT COUNT(*) {base_sql} AND schedule.status = 'new'", wparams).fetchone()[0]
 
+        # attempts are scoped through their exercise (the account owner)
         att = conn.execute(
-            "SELECT COALESCE(SUM(CASE WHEN solved = 1 THEN 1 ELSE 0 END), 0), COUNT(*),"
-            " COALESCE(SUM(ms), 0) FROM attempts").fetchone()
+            "SELECT COALESCE(SUM(CASE WHEN a.solved = 1 THEN 1 ELSE 0 END), 0), COUNT(*),"
+            " COALESCE(SUM(a.ms), 0) FROM attempts a JOIN exercises e ON e.id = a.ex_id"
+            " WHERE e.user_id = ?", (user_id,)).fetchone()
         solved_all, att_all, time_all = att
 
         att50 = conn.execute(
             "SELECT COALESCE(SUM(CASE WHEN solved = 1 THEN 1 ELSE 0 END), 0), COUNT(*)"
-            " FROM (SELECT solved FROM attempts ORDER BY attempted_at DESC, id DESC LIMIT 50)").fetchone()
+            " FROM (SELECT a.solved FROM attempts a JOIN exercises e ON e.id = a.ex_id"
+            " WHERE e.user_id = ? ORDER BY a.attempted_at DESC, a.id DESC LIMIT 50)",
+            (user_id,)).fetchone()
         solved50, total50 = att50
 
         weak = conn.execute(
-            "SELECT exercises.cls, COUNT(*) FROM attempts JOIN exercises ON exercises.id = attempts.ex_id"
-            " WHERE attempts.solved = 0 GROUP BY exercises.cls ORDER BY 2 DESC").fetchall()
+            "SELECT e.cls, COUNT(*) FROM attempts a JOIN exercises e ON e.id = a.ex_id"
+            " WHERE e.user_id = ? AND a.solved = 0 GROUP BY e.cls ORDER BY 2 DESC",
+            (user_id,)).fetchall()
 
         day_rows = conn.execute(
-            "SELECT DISTINCT strftime('%Y-%m-%d', attempted_at, 'unixepoch') FROM attempts"
-            " ORDER BY 1 DESC").fetchall()
+            "SELECT DISTINCT strftime('%Y-%m-%d', a.attempted_at, 'unixepoch') FROM attempts a"
+            " JOIN exercises e ON e.id = a.ex_id WHERE e.user_id = ?"
+            " ORDER BY 1 DESC", (user_id,)).fetchall()
     streak = 0
     from datetime import date, timedelta
     today = date.today()
@@ -477,7 +523,7 @@ def dashboard(filters=None):
     }
 
 
-def attempt_history(limit=50):
+def attempt_history(limit=50, user_id=""):
     limit = max(1, min(200, int(limit or 50)))
     with _lock:
         conn = _connect()
@@ -485,30 +531,34 @@ def attempt_history(limit=50):
             "SELECT a.id, a.ex_id, a.quality, a.played_uci, a.solved, a.ms, a.attempted_at,"
             " e.cls, e.label, e.best_san, e.played_san, e.move_number, e.color_side"
             " FROM attempts a JOIN exercises e ON e.id = a.ex_id"
-            " ORDER BY a.attempted_at DESC, a.id DESC LIMIT ?", (limit,)).fetchall()
+            " WHERE e.user_id = ?"
+            " ORDER BY a.attempted_at DESC, a.id DESC LIMIT ?", (user_id, limit)).fetchall()
     return [{
-        "id": r[0], "exerciseId": r[1], "quality": r[2], "playedUci": r[3],
+        "id": r[0], "exerciseId": _public_id(r[1], user_id), "quality": r[2], "playedUci": r[3],
         "solved": r[4], "ms": r[5], "attemptedAt": r[6],
         "cls": r[7], "label": r[8], "bestSan": r[9], "playedSan": r[10],
         "moveNumber": r[11], "colorSide": r[12],
     } for r in rows]
 
 
-def detach_source(source_id):
+def detach_source(source_id, user_id=""):
     """Used when a library game is deleted: loses the ref, orphans the exercise."""
     removed = 0
     with _lock:
         conn = _connect()
         cur = conn.execute(
-            "SELECT DISTINCT ex_id FROM exercise_sources WHERE source_id = ?", (source_id,)).fetchall()
+            "SELECT DISTINCT ex_id FROM exercise_sources WHERE source_id = ? AND user_id = ?",
+            (source_id, user_id)).fetchall()
         try:
             conn.execute("BEGIN")
-            conn.execute("DELETE FROM exercise_sources WHERE source_id = ?", (source_id,))
+            conn.execute("DELETE FROM exercise_sources WHERE source_id = ? AND user_id = ?",
+                         (source_id, user_id))
             for (ex_id,) in cur:
                 refs = conn.execute(
                     "SELECT COUNT(*) FROM exercise_sources WHERE ex_id = ?", (ex_id,)).fetchone()[0]
                 if refs == 0:
-                    conn.execute("UPDATE exercises SET removed = 1 WHERE id = ?", (ex_id,))
+                    conn.execute("UPDATE exercises SET removed = 1 WHERE id = ? AND user_id = ?",
+                                 (ex_id, user_id))
                     removed += 1
             conn.commit()
         except Exception:
@@ -517,26 +567,27 @@ def detach_source(source_id):
     return {"detachedRefs": len(cur), "exercisesRemoved": removed}
 
 
-def list_exercises(filters=None, limit=200):
+def list_exercises(filters=None, limit=200, user_id=""):
     filters = filters or {}
     limit = max(1, min(500, int(limit or 200)))
     now = int(time.time())
     with _lock:
         conn = _connect()
-        wsql, wparams = _filters_sql(filters, "exercises")
+        wsql, wparams = _filters_sql(filters, "exercises", user_id)
         rows = conn.execute(
             f"SELECT exercises.id, exercises.fen, exercises.color_side, exercises.cls, exercises.label,"
             f" exercises.best_san, exercises.played_san, exercises.move_number,"
             f" exercises.source_name, exercises.opening,"
             f" schedule.status, schedule.interval_days, schedule.reps, schedule.due_at,"
-            f" (SELECT COALESCE(SUM(occurrences), 1) FROM exercise_sources s WHERE s.ex_id = exercises.id)"
+            f" (SELECT COALESCE(SUM(occurrences), 1) FROM exercise_sources s"
+            f"  WHERE s.ex_id = exercises.id AND s.user_id = ?)"
             f" FROM exercises JOIN schedule ON schedule.ex_id = exercises.id"
             f" WHERE {wsql}"
-            f" ORDER BY schedule.due_at ASC LIMIT ?", (*wparams, limit)).fetchall()
+            f" ORDER BY schedule.due_at ASC LIMIT ?", (user_id, *wparams, limit)).fetchall()
     out = []
     for r in rows:
         out.append({
-            "id": r[0], "fen": r[1], "colorSide": r[2], "cls": r[3], "label": r[4],
+            "id": _public_id(r[0], user_id), "fen": r[1], "colorSide": r[2], "cls": r[3], "label": r[4],
             "bestSan": r[5], "playedSan": r[6], "moveNumber": r[7],
             "sourceName": r[8], "opening": r[9],
             "status": r[10], "intervalDays": r[11], "reps": r[12], "dueAt": r[13],
@@ -545,11 +596,12 @@ def list_exercises(filters=None, limit=200):
     return out
 
 
-def sources_list():
+def sources_list(user_id=""):
     with _lock:
         conn = _connect()
         rows = conn.execute(
             "SELECT exercises.source_id, MAX(exercises.source_name), COUNT(*)"
-            " FROM exercises WHERE exercises.removed = 0 GROUP BY exercises.source_id"
-            " ORDER BY 2").fetchall()
+            " FROM exercises WHERE exercises.removed = 0 AND exercises.user_id = ?"
+            " GROUP BY exercises.source_id"
+            " ORDER BY 2", (user_id,)).fetchall()
     return [{"id": r[0], "name": r[1], "count": r[2]} for r in rows]
