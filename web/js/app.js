@@ -4461,6 +4461,22 @@
   [$("trFilterCls"), $("trFilterSide"), $("trFilterStatus"), $("trFilterSource")].forEach((el) => {
     el.addEventListener("change", refreshTrainer);
   });
+  /* v83: the server's trainer database is wiped whenever the container is
+     replaced (deploys), and a fresh account starts empty, so re-create the
+     exercises from the local library whenever the server has none. The
+     extract is idempotent (it dedupes by position hash), so this is safe to
+     run on every boot. */
+  async function trainerSyncIfEmpty() {
+    const lib = libLoad().filter((g) => g && g.review);
+    if (!lib.length) return 0;
+    let total = null;
+    try {
+      const d = await api("/api/trainer/dashboard");
+      total = d && typeof d.total === "number" ? d.total : null;
+    } catch (e) { return 0; }
+    if (total !== 0) return 0;          // the server still holds its exercises
+    return trainerSyncAuto();
+  }
   // one-time migration: re-wrap the existing local library into the trainer DB
   try {
     if (!localStorage.getItem("crs_train_synced_63")) {
@@ -4839,7 +4855,8 @@
       accRefreshSession()
         .then(() => accSyncLibrary())
         .catch(() => {})
-        .then(() => perfSyncLibrary().catch(() => {}));
+        .then(() => perfSyncLibrary().catch(() => {}))
+        .then(() => trainerSyncIfEmpty().then(() => refreshTrainer()).catch(() => {}));
       loadSamples();
       maybeReattachJob(); // a review that was running at refresh keeps going
     });
