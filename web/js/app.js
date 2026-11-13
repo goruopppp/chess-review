@@ -153,12 +153,41 @@
   }
 
   /* ---------------- utils ---------------- */
+  /* v83 accounts: the bearer token lives in localStorage and rides on every
+     API call, so the server can scope the Lab / trainer / repertoires to the
+     signed-in account instead of the shared guest pool. */
+  const ACC_TOKEN_KEY = "crs_token";
+  const ACC_USER_KEY = "crs_user";
+  function accToken() {
+    try { return localStorage.getItem(ACC_TOKEN_KEY) || ""; } catch (e) { return ""; }
+  }
+  function accUser() {
+    try { return JSON.parse(localStorage.getItem(ACC_USER_KEY) || "null"); } catch (e) { return null; }
+  }
+  function accStore(token, user) {
+    try {
+      if (token) localStorage.setItem(ACC_TOKEN_KEY, token);
+      else localStorage.removeItem(ACC_TOKEN_KEY);
+      if (user) localStorage.setItem(ACC_USER_KEY, JSON.stringify(user));
+      else localStorage.removeItem(ACC_USER_KEY);
+    } catch (e) { /* private mode: the session just won't persist */ }
+  }
+
   async function api(path, opts) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 12000); // nothing hangs the render forever
+    const o = { ...(opts || {}) };
+    o.headers = { ...(o.headers || {}) };
+    const tok = accToken();
+    if (tok) o.headers["Authorization"] = "Bearer " + tok;
     try {
-      const r = await fetch(path, { ...(opts || {}), signal: ctrl.signal });
+      const r = await fetch(path, { ...o, signal: ctrl.signal });
       const data = await r.json().catch(() => ({}));
+      if (r.status === 401 && tok && path.indexOf("/api/auth/") !== 0) {
+        // the token was refused (revoked or expired): fall back to guest mode
+        accStore("", null);
+        accPaintAccount();
+      }
       if (!r.ok) throw new Error(data.error || r.statusText);
       return data;
     } finally { clearTimeout(t); }
@@ -3566,6 +3595,176 @@
     if (retry) retry.onclick = () => drillStart(q.side);
   }
 
+  /* ---------------- accounts (v83) ----------------
+     Signing in connects this browser to a cloud account. The saved-game library
+     is synced between devices, and the server-side Lab / trainer / repertoires
+     are scoped to that account instead of one shared pool. Without an account
+     everything still works - it just stays on this device. */
+  function accPaintAccount() {
+    const user = accUser();
+    const out = $("accSignedOut"), inn = $("accSignedIn");
+    if (out) out.hidden = !!user;
+    if (inn) inn.hidden = !user;
+    const btn = $("btnAccount");
+    if (btn) {
+      btn.classList.toggle("active", !!user);
+      btn.title = user ? "Account: " + user.username : "Account";
+      btn.setAttribute("aria-label", btn.title);
+    }
+    if (user) {
+      const who = $("accWho");
+      if (who) who.textContent = user.username;
+      const since = $("accSince");
+      if (since) {
+        since.textContent = user.createdAt
+          ? "Member since " + new Date(user.createdAt * 1000).toLocaleDateString() : "";
+      }
+      const cnt = $("accLibCount");
+      if (cnt) cnt.textContent = libLoad().length + " of " + LIB_MAX;
+    }
+  }
+
+  function accNote(text, isErr) {
+    const el = $("accMsg");
+    if (el) {
+      el.textContent = text || "";
+      el.style.color = isErr ? "#e06060" : "";
+    }
+  }
+  function accNoteSignedIn(text, isErr) {
+    const el = $("accSyncNote");
+    if (el) {
+      el.textContent = text || "";
+      el.style.color = isErr ? "#e06060" : "";
+    }
+  }
+
+  /* is the account data stored in the external (durable) database? */
+  let accRemote = null;
+  async function accCheckBackend() {
+    try {
+      const r = await api("/api/auth/status");
+      accRemote = !!(r && r.remote);
+    } catch (e) {
+      accRemote = null;
+    }
+    const note = $("accRemoteNote");
+    if (note) {
+      if (accRemote === false) {
+        note.hidden = false;
+        note.textContent = "Note: this server is not connected to the cloud database yet, "
+          + "so accounts and progress are stored locally and may be reset when the server redeploys.";
+      } else {
+        note.hidden = true;
+      }
+    }
+  }
+
+  /* restore the session: the token may have been revoked or the server
+     restarted with a fresh database, so always confirm it with the server */
+  async function accRefreshSession() {
+    if (!accToken()) { accPaintAccount(); return null; }
+    let user = accUser();
+    try {
+      const r = await api("/api/auth/me");
+      if (r && r.user) {
+        user = r.user;
+        accStore(accToken(), user);
+      } else {
+        user = null;
+        accStore("", null);
+      }
+    } catch (e) {
+      /* server unreachable: keep the cached identity, sync will retry later */
+    }
+    accPaintAccount();
+    return user;
+  }
+
+  /* push the local library to the account (merge-safe upsert on the server) */
+  async function accPushLibrary() {
+    if (!accToken()) return false;
+    const entries = libLoad().map((g) => ({ id: g.id, savedAt: g.savedAt, review: g.review }));
+    if (!entries.length) return false;
+    try {
+      await post("/api/account/library", { entries });
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /* pull the account library, merge with the local one (newer savedAt wins),
+     then push the merged list back so both sides converge */
+  async function accSyncLibrary() {
+    if (!accToken()) return;
+    let remote = [];
+    try {
+      const r = await api("/api/account/library");
+      remote = (r && r.entries) || [];
+    } catch (e) {
+      accNoteSignedIn("Could not reach the account library - progress stays on this device.", true);
+      return;
+    }
+    const local = libLoad();
+    const byId = new Map();
+    for (const g of local) if (g && g.id) byId.set(g.id, g);
+    for (const g of remote) {
+      if (!g || !g.id) continue;
+      const cur = byId.get(g.id);
+      if (!cur || (g.savedAt || 0) > (cur.savedAt || 0)) byId.set(g.id, g);
+    }
+    const merged = Array.from(byId.values())
+      .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0))
+      .slice(0, LIB_MAX);
+    const changed = merged.length !== local.length
+      || merged.some((g, i) => !local[i] || local[i].id !== g.id
+        || (local[i].savedAt || 0) !== (g.savedAt || 0));
+    if (changed) {
+      libSave(merged);
+      renderLibrary();
+    }
+    await accPushLibrary();
+    accPaintAccount();
+    const cnt = $("accLibCount");
+    if (cnt) cnt.textContent = merged.length + " of " + LIB_MAX;
+    accNoteSignedIn(remote.length
+      ? "Synced - " + merged.length + " saved game(s) available on every device."
+      : "Signed in. Save a game to start syncing.", false);
+  }
+
+  async function accDoLogin(register) {
+    const username = (($("accUserName") || {}).value || "").trim();
+    const password = (($("accPassword") || {}).value || "");
+    if (!username || !password) { accNote("Enter a username and a password.", true); return; }
+    accNote(register ? "Creating your account..." : "Signing in...", false);
+    try {
+      const r = await post(register ? "/api/auth/register" : "/api/auth/login",
+        { username, password });
+      if (!r || !r.token) throw new Error(r && r.error ? r.error : "Sign in failed");
+      accStore(r.token, r.user || null);
+      accNote("", false);
+      const pwd = $("accPassword");
+      if (pwd) pwd.value = "";
+      accPaintAccount();
+      toast(register ? "Account created - progress now syncs" : "Signed in", 3000);
+      await accSyncLibrary();
+      // the server-side analytics are account-scoped: re-attach and reload
+      perfSyncLibrary().catch(() => {});
+      refreshLab().catch(() => {});
+    } catch (e) {
+      accNote(e.message || "Sign in failed", true);
+    }
+  }
+
+  async function accDoLogout() {
+    try { await post("/api/auth/logout", {}); } catch (e) { /* token may be gone */ }
+    accStore("", null);
+    accPaintAccount();
+    accNoteSignedIn("", false);
+    toast("Signed out - progress stays on this device", 3500);
+    perfSyncLibrary().catch(() => {});
+    refreshLab().catch(() => {});
+  }
+
   /* ---------------- game library ---------------- */
   const LIB_KEY = "crs_library";
   const LIB_MAX = 8;
@@ -3581,6 +3780,7 @@
     const list = libLoad().filter((g) => g.id !== res.game.id);
     list.unshift({ id: res.game.id, savedAt: Date.now(), review: res });
     libSave(list);
+    accPushLibrary(); // v83: keep the account copy in step (fire and forget)
   }
   function libGameName(g) {
     const r = g.review;
@@ -3649,7 +3849,11 @@
         libSave(libLoad().filter((x) => x.id !== id));
         // drop trainer exercises that were sourced exclusively from this game
         post("/api/trainer/detach", { sourceId: id }).catch(() => {});
+        // v83: propagate the deletion to the account (deletes are explicit,
+        // so a synced device doesn't resurrect the game on the next pull)
+        if (accToken()) post("/api/account/library/delete", { id }).catch(() => {});
         renderLibrary();
+        accPaintAccount();
       };
     });
   }
@@ -4331,6 +4535,27 @@
   $("btnSettings").onclick = () => { $("modalSettings").hidden = false; };
   $("setClose").onclick = () => ($("modalSettings").hidden = true);
   $("modalSettings").onclick = (e) => { if (e.target === $("modalSettings")) $("modalSettings").hidden = true; };
+  /* v83 account panel */
+  $("btnAccount").onclick = () => {
+    accPaintAccount();
+    accNote("", false);
+    accCheckBackend();
+    $("modalAccount").hidden = false;
+    const un = $("accUserName");
+    if (un && !un.value && accUser()) un.value = accUser().username;
+  };
+  $("accClose").onclick = () => ($("modalAccount").hidden = true);
+  $("accDone").onclick = () => ($("modalAccount").hidden = true);
+  $("modalAccount").onclick = (e) => { if (e.target === $("modalAccount")) $("modalAccount").hidden = true; };
+  $("accLoginBtn").onclick = () => accDoLogin(false);
+  $("accRegisterBtn").onclick = () => accDoLogin(true);
+  $("accLogoutBtn").onclick = () => accDoLogout();
+  $("accPassword").onkeydown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); accDoLogin(false); }
+  };
+  $("accUserName").onkeydown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); $("accPassword").focus(); }
+  };
   function openKeysModal() {
     $("modalSettings").hidden = true;
     $("modalKeys").hidden = false;
@@ -4530,6 +4755,7 @@
       if (state.linePlay) { stopLinePlay(); return; }
       if (!$("modalKeys").hidden) { $("modalKeys").hidden = true; return; }
       if (!$("modalLibrary").hidden) { $("modalLibrary").hidden = true; return; }
+      if (!$("modalAccount").hidden) { $("modalAccount").hidden = true; return; }
       if (editor.active) { toggleEditor(false); return; }
       if (!$("modalSettings").hidden) { $("modalSettings").hidden = true; return; }
       if (!$("modalNew").hidden && $("progressPane").hidden) { hideModal(); return; }
@@ -4604,10 +4830,16 @@
         renderBoard();
       }
       repRestoreLast(); // reopen the last built/opened repertoire (tab + preview)
-      // v66: keep the Lab fed with every locally-saved review at boot
-      // (was a one-shot v64 flag; now a self-healing count-diff sync so container
-      // wipes on Render re-attach the whole library automatically)
-      perfSyncLibrary().catch(() => {});
+      // v83: restore the account session FIRST, pull the account's saved games
+      // into the local library, and only then re-attach every local review to
+      // the account-scoped Lab (v66: self-healing count-diff sync, so a wiped
+      // container re-attaches the whole library automatically)
+      accPaintAccount();
+      accCheckBackend();
+      accRefreshSession()
+        .then(() => accSyncLibrary())
+        .catch(() => {})
+        .then(() => perfSyncLibrary().catch(() => {}));
       loadSamples();
       maybeReattachJob(); // a review that was running at refresh keeps going
     });
