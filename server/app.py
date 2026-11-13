@@ -21,11 +21,123 @@ manager = EngineManager()
 from server import repstore  # noqa: E402
 repstore.init_db()
 
+from server import accounts  # noqa: E402
+from server import db as _db  # noqa: E402
+accounts.init_db()
+
+
+def _bearer(req):
+    """Bearer token from the Authorization header ('' when signed out)."""
+    auth = req.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
+
+
+def _uid():
+    """Account id for this request ('' = the shared guest pool)."""
+    return accounts.uid_from_request(request)
+
+
+# ---------------- accounts ----------------
+@app.get("/api/auth/status")
+def api_auth_status():
+    """Remote (external) database configured? Tells the client where data lives."""
+    return jsonify({"remote": bool(_db.REMOTE_ENABLED)})
+
+
+@app.post("/api/auth/register")
+def api_auth_register():
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        res = accounts.register(data.get("username") or "", data.get("password") or "")
+        return jsonify(res)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"register failed: {e}"}), 500
+
+
+@app.post("/api/auth/login")
+def api_auth_login():
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        res = accounts.login(data.get("username") or "", data.get("password") or "")
+        return jsonify(res)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 401
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"login failed: {e}"}), 500
+
+
+@app.post("/api/auth/logout")
+def api_auth_logout():
+    accounts.logout(_bearer(request))
+    return jsonify({"ok": True})
+
+
+@app.get("/api/auth/me")
+def api_auth_me():
+    token = _bearer(request)
+    user = accounts.me(token)
+    return jsonify({"user": user, "remote": bool(_db.REMOTE_ENABLED)})
+
+
+# ---------------- per-account game library ----------------
+@app.get("/api/account/library")
+def api_account_library():
+    uid = _uid()
+    if not uid:
+        return jsonify({"error": "not signed in"}), 401
+    try:
+        return jsonify({"entries": accounts.library_all(uid)})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"library load failed: {e}"}), 500
+
+
+@app.post("/api/account/library")
+def api_account_library_push():
+    """Merge-safe upsert of the client's saved games."""
+    uid = _uid()
+    if not uid:
+        return jsonify({"error": "not signed in"}), 401
+    data = request.get_json(force=True, silent=True) or {}
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        return jsonify({"error": "entries must be a list"}), 400
+    if len(entries) > 200:
+        entries = entries[:200]
+    try:
+        return jsonify(accounts.library_replace(uid, entries))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"library save failed: {e}"}), 500
+
+
+@app.post("/api/account/library/delete")
+def api_account_library_delete():
+    """Propagate a deletion from a synced device."""
+    uid = _uid()
+    if not uid:
+        return jsonify({"error": "not signed in"}), 401
+    data = request.get_json(force=True, silent=True) or {}
+    game_id = (data.get("id") or "").strip()
+    if not game_id:
+        return jsonify({"error": "missing id"}), 400
+    try:
+        return jsonify(accounts.library_delete(uid, game_id))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"library delete failed: {e}"}), 500
+
 
 @app.get("/api/repertoire/list")
 def api_rep_list():
     try:
-        return jsonify({"repertoires": repstore.list_repertoires()})
+        return jsonify({"repertoires": repstore.list_repertoires(_uid())})
     except Exception as e:
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
 
@@ -33,7 +145,8 @@ def api_rep_list():
 @app.post("/api/repertoire/save")
 def api_rep_save():
     try:
-        return jsonify(repstore.save_repertoire(request.get_json(force=True, silent=True) or {}))
+        payload = request.get_json(force=True, silent=True) or {}
+        return jsonify(repstore.save_repertoire(payload, _uid()))
     except Exception as e:
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
 
@@ -41,7 +154,7 @@ def api_rep_save():
 @app.get("/api/repertoire/get/<rid>")
 def api_rep_get(rid):
     try:
-        return jsonify(repstore.get_repertoire(rid))
+        return jsonify(repstore.get_repertoire(rid, _uid()))
     except Exception as e:
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 404
 
@@ -50,7 +163,7 @@ def api_rep_get(rid):
 def api_rep_delete():
     data = request.get_json(force=True, silent=True) or {}
     try:
-        repstore.delete_repertoire(data.get("id") or "")
+        repstore.delete_repertoire(data.get("id") or "", _uid())
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 404
@@ -60,7 +173,7 @@ def api_rep_delete():
 def api_rep_rename():
     data = request.get_json(force=True, silent=True) or {}
     try:
-        repstore.rename_repertoire(data.get("id") or "", data.get("name") or "")
+        repstore.rename_repertoire(data.get("id") or "", data.get("name") or "", _uid())
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 404
@@ -347,7 +460,7 @@ def api_trainer_extract():
         return jsonify({"error": "review payload missing moves/positions"}), 400
     try:
         exercises = trainer.extract_from_review(res)
-        counts = trainer.sync_exercises(exercises)
+        counts = trainer.sync_exercises(exercises, _uid())
         return jsonify({"ok": True, "candidates": len(exercises), **counts})
     except Exception as e:
         return jsonify({"error": f"trainer extract failed: {e}"}), 500
@@ -358,7 +471,7 @@ def api_trainer_dashboard():
     """Aggregated stats: totals, due/new/mastered, streak, accuracy, weak spots."""
     from server import trainer
     try:
-        return jsonify(trainer.dashboard(trainer._parse_filters(request.args)))
+        return jsonify(trainer.dashboard(trainer._parse_filters(request.args), _uid()))
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"dashboard failed: {e}"}), 500
@@ -369,7 +482,8 @@ def api_trainer_list():
     from server import trainer
     try:
         limit = max(1, min(500, int(request.args.get("limit") or 200)))
-        return jsonify({"exercises": trainer.list_exercises(trainer._parse_filters(request.args), limit)})
+        return jsonify({"exercises": trainer.list_exercises(
+            trainer._parse_filters(request.args), limit, _uid())})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -380,7 +494,7 @@ def api_trainer_queue():
     from server import trainer
     try:
         limit = max(1, min(60, int(request.args.get("limit") or 8)))
-        queue = trainer.next_queue(limit, trainer._parse_filters(request.args))
+        queue = trainer.next_queue(limit, trainer._parse_filters(request.args), True, _uid())
         return jsonify({"queue": queue})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -397,7 +511,8 @@ def api_trainer_result():
     try:
         quality = int(data.get("quality", 0))
         ms = max(0, int(data.get("ms", 0) or 0))
-        return jsonify(trainer.record_attempt(ex_id, quality, data.get("playedUci") or "", ms))
+        return jsonify(trainer.record_attempt(
+            ex_id, quality, data.get("playedUci") or "", ms, _uid()))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
@@ -409,7 +524,7 @@ def api_trainer_history():
     from server import trainer
     try:
         limit = max(1, min(200, int(request.args.get("limit") or 50)))
-        return jsonify({"history": trainer.attempt_history(limit)})
+        return jsonify({"history": trainer.attempt_history(limit, _uid())})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -417,7 +532,7 @@ def api_trainer_history():
 @app.get("/api/trainer/sources")
 def api_trainer_sources():
     from server import trainer
-    return jsonify({"sources": trainer.sources_list()})
+    return jsonify({"sources": trainer.sources_list(_uid())})
 
 
 @app.post("/api/trainer/detach")
@@ -429,7 +544,7 @@ def api_trainer_detach():
     if not source_id:
         return jsonify({"error": "missing sourceId"}), 400
     try:
-        return jsonify(trainer.detach_source(source_id))
+        return jsonify(trainer.detach_source(source_id, _uid()))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -447,7 +562,7 @@ def api_perf_import_pgn():
         return jsonify({"error": "file too large (20 MB limit)"}), 400
     try:
         parsed = perfdb.parse_pgn_text(text)
-        counts = perfdb.import_games(parsed, source="import")
+        counts = perfdb.import_games(parsed, source="import", user_id=_uid())
         return jsonify({"ok": True, "parsed": len(parsed), **counts})
     except Exception as e:
         traceback.print_exc()
@@ -460,7 +575,7 @@ def api_perf_import_review():
     from server import perfdb
     data = request.get_json(force=True, silent=True) or {}
     try:
-        res = perfdb.attach_review(data.get("review"))
+        res = perfdb.attach_review(data.get("review"), _uid())
         return jsonify(res)
     except Exception as e:
         traceback.print_exc()
@@ -470,20 +585,20 @@ def api_perf_import_review():
 @app.get("/api/perf/overall")
 def api_perf_overall():
     from server import perfdb
-    return jsonify(perfdb.overall())
+    return jsonify(perfdb.overall(_uid()))
 
 
 @app.get("/api/perf/openings")
 def api_perf_openings():
     from server import perfdb
-    return jsonify(perfdb.openings_report())
+    return jsonify(perfdb.openings_report(_uid()))
 
 
 @app.get("/api/perf/weaknesses")
 def api_perf_weaknesses():
     from server import perfdb
     try:
-        return jsonify(perfdb.weaknesses())
+        return jsonify(perfdb.weaknesses(_uid()))
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -493,7 +608,7 @@ def api_perf_weaknesses():
 def api_perf_recommendations():
     from server import perfdb
     try:
-        return jsonify(perfdb.recommendations())
+        return jsonify(perfdb.recommendations(_uid()))
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -502,14 +617,15 @@ def api_perf_recommendations():
 @app.get("/api/perf/timeline")
 def api_perf_timeline():
     from server import perfdb
-    return jsonify(perfdb.timeline())
+    return jsonify(perfdb.timeline(_uid()))
 
 
 @app.get("/api/perf/games")
 def api_perf_games():
     from server import perfdb
     limit = max(1, min(500, int(request.args.get("limit") or 100)))
-    return jsonify({"games": perfdb.list_games(limit), "total": perfdb.games_total()})
+    uid = _uid()
+    return jsonify({"games": perfdb.list_games(limit, uid), "total": perfdb.games_total(uid)})
 
 
 @app.get("/api/perf/metrics")
@@ -519,7 +635,7 @@ def api_perf_metrics():
     color = (request.args.get("color") or "white").strip().lower()
     if color not in ("white", "black"):
         color = "white"
-    return jsonify(perfdb.metrics(color))
+    return jsonify(perfdb.metrics(color, _uid()))
 
 
 @app.get("/api/perf/series")
@@ -529,7 +645,7 @@ def api_perf_series():
     color = (request.args.get("color") or "white").strip().lower()
     if color not in ("white", "black"):
         color = "white"
-    return jsonify(perfdb.skill_series(color))
+    return jsonify(perfdb.skill_series(color, _uid()))
 
 
 @app.post("/api/perf/games/delete")
@@ -537,7 +653,7 @@ def api_perf_games_delete():
     from server import perfdb
     data = request.get_json(force=True, silent=True) or {}
     try:
-        return jsonify({"ok": perfdb.delete_game((data.get("id") or "").strip())})
+        return jsonify({"ok": perfdb.delete_game((data.get("id") or "").strip(), _uid())})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -549,15 +665,16 @@ def api_perf_aliases():
     a, c = (data.get("alias") or "").strip(), (data.get("canonical") or "").strip()
     if not a or not c:
         return jsonify({"error": "alias and canonical required"}), 400
-    perfdb.add_alias(a, c)
-    perfdb.normalize_aliases()
+    uid = _uid()
+    perfdb.add_alias(a, c, uid)
+    perfdb.normalize_aliases(uid)
     return jsonify({"ok": True})
 
 
 @app.get("/api/perf/aliases")
 def api_perf_aliases_get():
     from server import perfdb
-    return jsonify({"aliases": perfdb.list_aliases()})
+    return jsonify({"aliases": perfdb.list_aliases(_uid())})
 
 
 _rjobs = {}
