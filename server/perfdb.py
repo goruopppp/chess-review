@@ -28,6 +28,49 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "perfdb.sqlite"
 _lock = threading.RLock()
 _conn = None
 
+# --- short-lived cache for the read-only analytics ------------------------
+# With an external database every query is a round trip, and the Lab asks for
+# eight reports at once - each one several statements. The results change
+# only when a game is added, reviewed or deleted, so the analytics are cached
+# for a few seconds and every write clears the cache. Same data, far fewer
+# round trips.
+_CACHE_TTL = 10.0
+_cache = {}
+
+
+def _cache_get(key):
+    hit = _cache.get(key)
+    if not hit:
+        return None
+    ts, val = hit
+    if time.time() - ts > _CACHE_TTL:
+        _cache.pop(key, None)
+        return None
+    return val
+
+
+def _cache_set(key, value):
+    _cache[key] = (time.time(), value)
+    return value
+
+
+def cache_clear():
+    """Called by every mutating path so the analytics never go stale."""
+    _cache.clear()
+
+
+def _cached(fn):
+    """Memoize a read-only analytics function for a few seconds."""
+    def wrapper(*args, **kwargs):
+        key = (fn.__name__, args, tuple(sorted(kwargs.items())))
+        hit = _cache_get(key)
+        if hit is not None:
+            return hit
+        return _cache_set(key, fn(*args, **kwargs))
+    wrapper.__name__ = fn.__name__
+    wrapper.__doc__ = fn.__doc__
+    return wrapper
+
 # ---------------------------------------------------------------- schema & migration
 
 
@@ -255,6 +298,7 @@ def canonical_players_sql(name_tokens):
 
 
 def import_games(games, source="import", user_id=""):
+    cache_clear()
     counts = {"inserted": 0, "duplicates": 0, "skipped": 0}
     with _lock:
         conn = _connect()
@@ -282,6 +326,7 @@ def import_games(games, source="import", user_id=""):
                      0, g["pgn"], user_id, now, now))
                 counts["inserted"] += 1
             conn.commit()
+            cache_clear()      # the analytics changed
         except Exception:
             conn.rollback()
             raise
@@ -290,6 +335,7 @@ def import_games(games, source="import", user_id=""):
 
 def attach_review(res, user_id=""):
     """Upsert a review payload. Returns (created|updated|missing)."""
+    cache_clear()
     if not isinstance(res, dict):
         return {"ok": False, "reason": "bad payload"}
     game = res.get("game", {})
@@ -399,6 +445,7 @@ def attach_review(res, user_id=""):
                  blobs["phase_json"], blobs["time_json"],
                  blobs["graph_json"], blobs["moves_json"], user_id))
             conn.commit()
+            cache_clear()      # the analytics changed
         except Exception:
             conn.rollback()
             raise
@@ -425,6 +472,7 @@ def _row(conn, gid):
     }
 
 
+@_cached
 def list_games(limit=100, user_id=""):
     with _lock:
         conn = _connect()
@@ -437,6 +485,7 @@ def list_games(limit=100, user_id=""):
     return [_row(None, r) for r in rows]
 
 
+@_cached
 def games_total(user_id=""):
     """Real games count for the Lab list header ('N shown of M imported')."""
     with _lock:
@@ -490,6 +539,7 @@ def _consistency_score(sd):
     return max(0, min(100, round(100 - (sd - 6) * (100 / 14))))
 
 
+@_cached
 def metrics(color="white", user_id=""):
     """Per-side behavior metrics over all reviewed games (aimchess-style stats)."""
     me = "white" if (color or "white").lower() != "black" else "black"
@@ -624,6 +674,7 @@ def metrics(color="white", user_id=""):
     }
 
 
+@_cached
 def skill_series(color="white", user_id=""):
     """Per-game skill series for the Lab tiles (aimchess-style line charts).
 
@@ -701,6 +752,7 @@ def skill_series(color="white", user_id=""):
     return {"color": me, "wdl": wdl, "skills": out}
 
 
+@_cached
 def overall(user_id=""):
     with _lock:
         conn = _connect()
@@ -809,6 +861,7 @@ def overall(user_id=""):
     }
 
 
+@_cached
 def games_by_id(ids, user_id=""):
     ids = [str(i) for i in (ids or []) if i][:500]
     if not ids:
@@ -826,16 +879,19 @@ def games_by_id(ids, user_id=""):
 
 def delete_game(gid, user_id=""):
     """Remove a game AND its review (cascade is enforced by FK pragma + explicit delete)."""
+    cache_clear()
     with _lock:
         conn = _connect()
         conn.execute("BEGIN")
         conn.execute("DELETE FROM reviews WHERE game_id = ? AND user_id = ?", (gid, user_id))
         cur = conn.execute("DELETE FROM games WHERE id = ? AND user_id = ?", (gid, user_id))
         conn.commit()
+    cache_clear()
     return cur.rowcount > 0
 
 
 def add_alias(alias, canonical, user_id=""):
+    cache_clear()
     alias, canonical = alias.strip(), canonical.strip()
     with _lock:
         conn = _connect()
@@ -853,9 +909,11 @@ def add_alias(alias, canonical, user_id=""):
                 # account owns that name — leave their mapping untouched
                 pass
         conn.commit()
+    cache_clear()
     return {"ok": True}
 
 
+@_cached
 def list_aliases(user_id=""):
     with _lock:
         conn = _connect()
@@ -865,15 +923,18 @@ def list_aliases(user_id=""):
 
 
 def remove_alias(alias, user_id=""):
+    cache_clear()
     with _lock:
         conn = _connect()
         cur = conn.execute("DELETE FROM aliases WHERE alias = ? AND user_id = ?",
                            (alias.strip(), user_id))
         conn.commit()
+    cache_clear()
     return cur.rowcount > 0
 
 
 def normalize_aliases(user_id=""):
+    cache_clear()
     with _lock:
         conn = _connect()
         rows = conn.execute("SELECT alias, canonical FROM aliases WHERE user_id = ?",
@@ -889,6 +950,7 @@ def normalize_aliases(user_id=""):
         except Exception:
             conn.rollback()
             raise
+    cache_clear()
     return {"ok": True, "aliasesApplied": len(rows)}
 
 
@@ -899,6 +961,7 @@ def _reviews_only_count(user_id=""):
                             (user_id,)).fetchone()[0]
 
 
+@_cached
 def weaknesses(user_id=""):
     """Rule-based weakness fingerprint. Each rule fires on REAL rows; severity &
     confidence derive from raw counts with explicit thresholds."""
@@ -1080,6 +1143,7 @@ def weaknesses(user_id=""):
         }
 
 
+@_cached
 def recommendations(user_id=""):
     w = weaknesses(user_id)
     findings = w.get("weaknesses", [])
@@ -1164,6 +1228,7 @@ def recommendations(user_id=""):
     return {"reviewedGames": w.get("reviewedGames", 0), "recommendations": recs}
 
 
+@_cached
 def timeline(user_id=""):
     with _lock:
         conn = _connect()
@@ -1195,6 +1260,7 @@ def timeline(user_id=""):
     return {"points": points}
 
 
+@_cached
 def openings_report(user_id=""):
     with _lock:
         conn = _connect()
