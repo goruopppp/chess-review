@@ -40,6 +40,27 @@ MAX_PGN_CHARS = 400_000
 MAX_REVIEW_JOBS = 24
 
 
+@app.before_request
+def _reject_invalid_token():
+    """A request that presents a token the server does not accept is refused
+    outright.
+
+    Without this, an expired or revoked token silently fell back to the
+    shared guest pool, so signing out still showed data - and a stale token
+    looked like it had worked. No Authorization header at all still means
+    "guest", which is the public, account-less mode.
+    """
+    if not request.path.startswith("/api/"):
+        return None
+    auth = request.headers.get("Authorization", "")
+    if not auth or not auth.lower().startswith("bearer "):
+        return None
+    if not accounts.uid_from_token(auth[7:].strip()):
+        security.log_event("invalid_token", ip=_client_ip())
+        return jsonify({"error": "Session expired - please sign in again"}), 401
+    return None
+
+
 @app.after_request
 def add_security_headers(resp):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
