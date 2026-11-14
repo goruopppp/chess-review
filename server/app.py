@@ -92,10 +92,30 @@ def api_account_library():
     if not uid:
         return jsonify({"error": "not signed in"}), 401
     try:
+        # ?meta=1 -> ids + timestamps only (the client then pulls what it lacks)
+        if (request.args.get("meta") or "").strip() in ("1", "true", "yes"):
+            return jsonify({"entries": accounts.library_meta(uid)})
         return jsonify({"entries": accounts.library_all(uid)})
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"library load failed: {e}"}), 500
+
+
+@app.post("/api/account/library/pull")
+def api_account_library_pull():
+    """Fetch the full entries for specific ids (keeps the sync small)."""
+    uid = _uid()
+    if not uid:
+        return jsonify({"error": "not signed in"}), 401
+    data = request.get_json(force=True, silent=True) or {}
+    ids = data.get("ids")
+    if not isinstance(ids, list):
+        return jsonify({"error": "ids must be a list"}), 400
+    try:
+        return jsonify({"entries": accounts.library_get(uid, ids[:500])})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"library pull failed: {e}"}), 500
 
 
 @app.post("/api/account/library")
