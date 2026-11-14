@@ -3681,30 +3681,61 @@
     return user;
   }
 
-  /* push the local library to the account (merge-safe upsert on the server) */
+  /* push the local library to the account (merge-safe upsert on the server).
+     Only entries the server has not seen yet are sent - a full review is
+     ~70 KB, so re-uploading everything on every save would be wasteful. */
+  let accPushed = {};        // id -> savedAt already on the server
+  let accPushedFor = "";     // the account those entries belong to
   async function accPushLibrary() {
     if (!accToken()) return false;
-    const entries = libLoad().map((g) => ({ id: g.id, savedAt: g.savedAt, review: g.review }));
-    if (!entries.length) return false;
+    const user = accUser();
+    const who = user ? user.id : "";
+    if (accPushedFor !== who) { accPushed = {}; accPushedFor = who; }
+    const fresh = libLoad().filter((g) => g && g.id && accPushed[g.id] !== g.savedAt);
+    if (!fresh.length) return true;
+    const entries = fresh.map((g) => ({ id: g.id, savedAt: g.savedAt, review: g.review }));
     try {
       await post("/api/account/library", { entries });
+      for (const g of fresh) accPushed[g.id] = g.savedAt;
       return true;
     } catch (e) { return false; }
   }
 
-  /* pull the account library, merge with the local one (newer savedAt wins),
-     then push the merged list back so both sides converge */
+  /* sync with the account: ask for the list of ids + timestamps (tiny), then
+     pull only the games this device is missing or has an older copy of. The
+     merged result is saved locally and pushed back, so both sides converge. */
   async function accSyncLibrary() {
     if (!accToken()) return;
-    let remote = [];
+    let meta = [];
     try {
-      const r = await api("/api/account/library");
-      remote = (r && r.entries) || [];
+      const r = await api("/api/account/library?meta=1");
+      meta = (r && r.entries) || [];
     } catch (e) {
       accNoteSignedIn("Could not reach the account library - progress stays on this device.", true);
       return;
     }
     const local = libLoad();
+    const localById = new Map();
+    for (const g of local) if (g && g.id) localById.set(g.id, g);
+
+    // which games do we actually need from the server?
+    const need = [];
+    for (const m of meta) {
+      if (!m || !m.id) continue;
+      const cur = localById.get(m.id);
+      if (!cur || (m.savedAt || 0) > (cur.savedAt || 0)) need.push(m.id);
+    }
+    let remote = [];
+    if (need.length) {
+      try {
+        const r = await post("/api/account/library/pull", { ids: need });
+        remote = (r && r.entries) || [];
+      } catch (e) {
+        accNoteSignedIn("Could not download the saved games from your account.", true);
+        return;
+      }
+    }
+
     const byId = new Map();
     for (const g of local) if (g && g.id) byId.set(g.id, g);
     for (const g of remote) {
@@ -3726,7 +3757,7 @@
     accPaintAccount();
     const cnt = $("accLibCount");
     if (cnt) cnt.textContent = merged.length + " of " + LIB_MAX;
-    accNoteSignedIn(remote.length
+    accNoteSignedIn(merged.length
       ? "Synced - " + merged.length + " saved game(s) available on every device."
       : "Signed in. Save a game to start syncing.", false);
   }
@@ -3767,14 +3798,32 @@
 
   /* ---------------- game library ---------------- */
   const LIB_KEY = "crs_library";
-  const LIB_MAX = 8;
+  /* A review is ~70 KB of JSON, so the browser's ~5-12 MB localStorage holds
+     dozens of games comfortably; the account copy has no such limit. 60 keeps
+     the sync payload sane while being 7x the old cap. */
+  const LIB_MAX = 60;
 
   function libLoad() {
     try { return JSON.parse(localStorage.getItem(LIB_KEY) || "[]"); } catch (e) { return []; }
   }
   function libSave(list) {
-    try { localStorage.setItem(LIB_KEY, JSON.stringify(list.slice(0, LIB_MAX))); }
-    catch (e) { toast("Library too large to save - delete a game first"); }
+    const capped = list.slice(0, LIB_MAX);
+    try {
+      localStorage.setItem(LIB_KEY, JSON.stringify(capped));
+      return true;
+    } catch (e) {
+      // out of quota: keep as many of the newest as actually fit instead of
+      // losing the whole library
+      for (let n = capped.length - 1; n > 0; n--) {
+        try {
+          localStorage.setItem(LIB_KEY, JSON.stringify(capped.slice(0, n)));
+          toast(`Storage is full - kept the ${n} most recent game(s)`, 4000);
+          return true;
+        } catch (e2) { /* try fewer */ }
+      }
+      toast("Library too large to save - delete a game first");
+      return false;
+    }
   }
   function libAdd(res) {
     const list = libLoad().filter((g) => g.id !== res.game.id);
