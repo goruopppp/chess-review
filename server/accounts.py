@@ -200,6 +200,41 @@ def library_all(uid):
     return out
 
 
+def library_meta(uid):
+    """Just the ids and timestamps - the full reviews are large, so a client
+    that already has most games only needs to know what changed."""
+    if not uid:
+        return []
+    with _lock:
+        conn = _connect()
+        rows = conn.execute(
+            "SELECT game_id, saved_at FROM user_library WHERE user_id = ? ORDER BY saved_at DESC",
+            (uid,)).fetchall()
+    return [{"id": r[0], "savedAt": r[1]} for r in rows]
+
+
+def library_get(uid, ids):
+    """The full entries for the given game ids only."""
+    if not uid or not ids:
+        return []
+    ids = [str(i) for i in ids if i][:500]
+    if not ids:
+        return []
+    placeholders = ",".join(["?"] * len(ids))
+    with _lock:
+        conn = _connect()
+        rows = conn.execute(
+            "SELECT payload FROM user_library WHERE user_id = ? AND game_id IN (" + placeholders + ")",
+            [uid] + ids).fetchall()
+    out = []
+    for (pj,) in rows:
+        try:
+            out.append(json.loads(pj))
+        except Exception:
+            continue
+    return out
+
+
 def library_delete(uid, game_id):
     """Remove one entry (propagates a delete from a synced device)."""
     if not uid:
