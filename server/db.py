@@ -11,11 +11,16 @@ new pip dependency is needed.
 RemoteConn connection semantics (mirrors what the stores expect from sqlite3):
   - execute() runs immediately and autocommits, EXCEPT writes issued while an
     explicit transaction is open ("BEGIN" ... commit/rollback): those are
-    buffered client-side and flushed as ONE pipeline batch at the next read or
-    commit() — preserving write-before-read visibility with a single round
-    trip. rollback() discards the buffer; a read after an early flush means
-    later rollback cannot undo already-sent statements (only matters on the
-    failure paths of bulk imports, which are idempotent).
+    buffered client-side and sent as ONE pipeline batch
+    (BEGIN, ...writes, COMMIT/ROLLBACK). The Turso pipeline runs every
+    statement of a batch on one connection, so BEGIN/COMMIT/ROLLBACK are real
+    transactions - a failed import rolls back on the server, not just here.
+  - a read inside an open transaction flushes the buffered writes first (in
+    the same batch, before the COMMIT) so the read sees them; those writes are
+    then durable, so a later rollback cannot take them back. The failure paths
+    that hit this are idempotent by construction.
+  - values travel as libSQL's tagged form ({"type":"text","value":...}) in
+    both directions; numbers go over the wire as strings.
   - PRAGMA foreign_keys is a no-op remotely (every delete path cleans up
     explicitly); PRAGMA table_info(<t>) is answered from the live table shape
     so the stores' tolerant migrations keep working.
@@ -106,7 +111,7 @@ def _pipeline(steps, retry=True):
 
 # ---------------------------------------------------------------- value shapes
 def _norm_cell(v):
-    """Hrana may return plain scalars or typed {"type","value"} objects."""
+    """Hrana returns tagged values: {"type":"integer","value":"1"}."""
     if isinstance(v, dict) and "type" in v and "value" in v:
         t, val = v.get("type"), v.get("value")
         if t == "null" or val is None:
@@ -136,14 +141,48 @@ def _norm_rows(rows):
     return [tuple(_norm_cell(c) for c in r) for r in (rows or [])]
 
 
+def _col_names(cols):
+    """The pipeline returns cols as [{"name":..,"decltype":..}]."""
+    out = []
+    for c in (cols or []):
+        if isinstance(c, dict):
+            out.append(c.get("name"))
+        else:
+            out.append(c)
+    return out
+
+
+def _rowcount(result):
+    """Rows touched by a statement (UPDATE/DELETE/INSERT)."""
+    for key in ("affected_row_count", "rows_written", "rows_affected"):
+        v = result.get(key)
+        if isinstance(v, int):
+            return v
+    return 0
+
+
 def _enc(a):
-    if a is None or isinstance(a, (str, int, float)):
-        return a
+    """Encode a Python value as libSQL's tagged Value.
+
+    The HTTP pipeline rejects bare scalars ("expected internally tagged enum
+    Value"), so every argument carries its type explicitly - and numbers go
+    over the wire as strings, exactly like the server sends them back.
+    """
+    if a is None:
+        return {"type": "null", "value": None}
     if isinstance(a, bool):
-        return int(a)
+        return {"type": "integer", "value": str(int(a))}
+    if isinstance(a, int):
+        return {"type": "integer", "value": str(a)}
+    if isinstance(a, float):
+        # a float must go over the wire as a JSON number - unlike integers,
+        # which Turso expects as strings
+        return {"type": "float", "value": a}
+    if isinstance(a, str):
+        return {"type": "text", "value": a}
     if isinstance(a, (bytes, bytearray)):
-        return base64.b64encode(bytes(a)).decode("ascii")
-    return str(a)
+        return {"type": "blob", "value": base64.b64encode(bytes(a)).decode("ascii")}
+    return {"type": "text", "value": str(a)}
 
 
 class RemoteCursor:
@@ -189,7 +228,7 @@ class RemoteConn:
 
     # -- single statement ----------------------------------------------------
     @staticmethod
-    def _step(sql, params):
+    def _step(sql, params=()):
         stmt = {"sql": sql}
         if params:
             stmt["args"] = [_enc(a) for a in params]
@@ -216,15 +255,21 @@ class RemoteConn:
     def _direct(self, sql, params):
         (result,) = self._run([self._step(sql, params)])
         rows = _norm_rows(result.get("rows"))
-        rc = result.get("rows_written")
-        if not isinstance(rc, int):
-            rc = 0
-        return RemoteCursor(rows, result.get("cols") or [], rc)
+        rc = _rowcount(result)
+        return RemoteCursor(rows, _col_names(result.get("cols")), rc)
 
-    def _flush(self):
+    def _flush(self, tail="COMMIT"):
+        """Send the buffered transaction as ONE batch: BEGIN ... ROLLBACK/COMMIT.
+
+        The Turso pipeline runs every statement of a batch on one connection, so
+        a real BEGIN/COMMIT/ROLLBACK inside the batch gives us genuine
+        transactions - a failed import rolls back for real, not just locally.
+        """
         if not self._pending:
             return
-        steps = [self._step(s, p) for (s, p) in self._pending]
+        steps = [self._step("BEGIN")]
+        steps += [self._step(s, p) for (s, p) in self._pending]
+        steps.append(self._step(tail))
         self._pending = []
         self._run(steps)
 
@@ -241,20 +286,24 @@ class RemoteConn:
         if up.startswith("COMMIT") or up[:4] == "END ":
             self.commit()
             return RemoteCursor([], [], -1)
+        if up.startswith("ROLLBACK"):
+            self.rollback()
+            return RemoteCursor([], [], -1)
         if self._in_txn and not _READ_RE.match(s):
             self._pending.append((s, params))
             return RemoteCursor([], [], -1)
-        # read or autocommit write; inside a transaction, pending writes go
-        # first so the read sees them (one round trip for the whole group)
+        # a read inside a transaction: send the pending writes first so the read
+        # sees them, and close the batch with COMMIT so the server keeps them
         if self._pending:
-            steps = [self._step(ps, pp) for (ps, pp) in self._pending]
-            self._pending = []
+            steps = [self._step("BEGIN")]
+            steps += [self._step(ps, pp) for (ps, pp) in self._pending]
             steps.append(self._step(s, params))
+            steps.append(self._step("COMMIT"))
+            self._pending = []
             results = self._run(steps)
-            result = results[-1]
+            result = results[-2]      # the read; the last step is COMMIT
             rows = _norm_rows(result.get("rows"))
-            rc = result.get("rows_written")
-            return RemoteCursor(rows, result.get("cols") or [], rc if isinstance(rc, int) else 0)
+            return RemoteCursor(rows, _col_names(result.get("cols")), _rowcount(result))
         return self._direct(s, params)
 
     def _pragma(self, sql):
@@ -275,7 +324,7 @@ class RemoteConn:
                 pass
             # fallback: derive the column names from an empty select
             (res,) = self._run([self._step("SELECT * FROM \"%s\" LIMIT 0" % name, ())])
-            cols = res.get("cols") or []
+            cols = _col_names(res.get("cols"))
             rows = [(i, c, "", 0, None, 0) for i, c in enumerate(cols)]
             return RemoteCursor(rows, ["cid", "name", "type", "notnull", "dflt_value", "pk"], 0)
         # PRAGMA foreign_keys etc.: nothing to enforce client-side; deletes
@@ -284,12 +333,14 @@ class RemoteConn:
 
     def commit(self):
         if self._in_txn:
+            self._flush("COMMIT")
             self._in_txn = False
-        self._flush()
+        else:
+            self._flush("COMMIT")
 
     def rollback(self):
         self._in_txn = False
-        self._pending = []
+        self._flush("ROLLBACK")
 
     def close(self):
         pass
