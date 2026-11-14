@@ -446,6 +446,18 @@ def attach_review(res, user_id=""):
                  blobs["graph_json"], blobs["moves_json"], user_id))
             conn.commit()
             cache_clear()      # the analytics changed
+            if user_id:
+                # The game now belongs to an account, so its copy in the
+                # shared guest pool goes away - that pool is visible to every
+                # visitor, and the owner has it safely in their account.
+                plain = gid.split(":", 1)[1] if ":" in gid else gid
+                try:
+                    conn.execute("DELETE FROM reviews WHERE game_id = ? AND user_id = ''",
+                                 (plain,))
+                    conn.execute("DELETE FROM games WHERE id = ? AND user_id = ''", (plain,))
+                    conn.commit()
+                except Exception:
+                    pass
         except Exception:
             conn.rollback()
             raise
