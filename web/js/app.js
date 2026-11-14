@@ -962,7 +962,7 @@
     if (!entry.cls) { el.textContent = `${entry.san} � evaluating�`; return; }
     const label = EXPLORE_LABELS[entry.cls] || entry.cls;
     const acc = entry.accuracy != null ? ` � ${entry.accuracy.toFixed(0)}%` : "";
-    el.innerHTML = `last: <b>${entry.san}</b> ${smallChip(entry.cls)} ${label}${acc}`;
+    el.innerHTML = `last: <b>${esc(entry.san)}</b> ${smallChip(entry.cls)} ${esc(label)}${esc(acc)}`;
   }
 
   function pickPromotion(from, to, matches) {
@@ -1066,6 +1066,25 @@
     const sym = badgeSymbol(cls);
     if (!sym) return "";
     return `<span class="chip cls-${cls}">${sym}</span>`;
+  }
+
+  /* ---- HTML escaping (security) ----------------------------------------
+     Player names, opening names and error messages come from PGNs and from
+     other people's accounts, and are written into the page with innerHTML.
+     Escaping them is what stops one user's saved game from running script
+     in another user's browser (which would steal their session token). */
+  function esc(v) {
+    if (v === null || v === undefined) return "";
+    return String(v)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+  /* for values placed inside an HTML attribute */
+  function escAttr(v) {
+    return esc(v).replace(/`/g, "&#96;");
   }
 
   /* engine-line eval display: always white-perspective cp from the payload */
@@ -1238,8 +1257,8 @@
     const pcard = (color, label) => {
       const p = R.players[color];
       return `<div class="pcard"><div class="row">
-        <span class="avatar ${color === "white" ? "w" : "b"}">${label[0]}</span>
-        <div><div class="p-name">${p.name || label}</div>
+        <span class="avatar ${color === "white" ? "w" : "b"}">${esc(label[0])}</span>
+        <div><div class="p-name">${esc(p.name || label)}</div>
         <div class="est">played like a <b>${p.estRating}</b>-rated player � ACPL ${p.acpl}</div></div>
         <div style="margin-left:auto;text-align:right"><div class="big-acc">${p.accuracy}%</div>
         <div class="est">overall accuracy</div></div>
@@ -1249,7 +1268,7 @@
     };
     el.innerHTML = pcard("white", "White") + pcard("black", "Black") +
       `<h4 class="panel-sub">Next level plan</h4>
-       <ul class="bullets">${R.summary.bullets.map((b) => `<li>${b}</li>`).join("")}</ul>`;
+       <ul class="bullets">${R.summary.bullets.map((b) => `<li>${esc(b)}</li>`).join("")}</ul>`;
   }
 
   function renderAccuracySummary() {
@@ -1271,8 +1290,8 @@
     const row = (color, label) => {
       const p = R.players[color];
       return `<div class="as-row">
-        <span class="avatar ${color === "white" ? "w" : "b"}">${label[0]}</span>
-        <span class="as-name">${p.name || label}${g[color === "white" ? "WhiteElo" : "BlackElo"] ? ` <span class="text-muted">(${g[color === "white" ? "WhiteElo" : "BlackElo"]})</span>` : ""}</span>
+        <span class="avatar ${color === "white" ? "w" : "b"}">${esc(label[0])}</span>
+        <span class="as-name">${esc(p.name || label)}${g[color === "white" ? "WhiteElo" : "BlackElo"] ? ` <span class="text-muted">(${g[color === "white" ? "WhiteElo" : "BlackElo"]})</span>` : ""}</span>
         <span class="as-acc">${p.accuracy}%<small>accuracy</small></span>
         ${countRow(p)}
       </div>`;
@@ -1294,12 +1313,12 @@
         const sw = m.color === "white" ? (m.cpBefore - m.cpAfter) : (m.cpAfter - m.cpBefore);
         const swTxt = Number.isFinite(sw) && sw > 0 ? `<span class="cm-loss">&minus;${(Math.min(sw, 1000) / 100).toFixed(1)}</span>` : "";
         return `<button class="cm-row" type="button" data-ply="${i}">
-          <span class="cm-move">${m.moveNumber}${m.color === "white" ? "." : "..."} ${m.san}</span>
+          <span class="cm-move">${esc(m.moveNumber)}${m.color === "white" ? "." : "..."} ${esc(m.san)}</span>
           ${smallChip(m.class)}${swTxt}<span class="cm-jump">&rarr;</span>
         </button>`;
       }).join("")}</div>` : "";
     el.innerHTML = row("white", "White") + row("black", "Black") +
-      (meta ? `<div class="as-meta">${meta}</div>` : "") +
+      (meta ? `<div class="as-meta">${esc(meta)}</div>` : "") +
       `<div class="as-train">
         <button id="btnTrainW" class="btn btn-sm" type="button">${TARGET_SVG} Train as White</button>
         <button id="btnTrainB" class="btn btn-sm" type="button">${TARGET_SVG} Train as Black</button>
@@ -1559,7 +1578,7 @@
           el.innerHTML = /token/i.test(e.message)
             ? `<div class="empty-hint small">Lichess now requires a (free) API token for the explorer.<br>
                Open <b>? settings</b> and paste a personal token from<br>lichess.org/account/oauth/token</div>`
-            : `<div class="empty-hint small">Explorer unavailable (${e.message}).</div>`;
+            : `<div class="empty-hint small">Explorer unavailable (${esc(e.message)}).</div>`;
         }
       }
     }, 250);
@@ -1605,13 +1624,13 @@
     done: "Done",
   })[s] || s;
 
-  async function pollJob(jobId) {
+  async function pollJob(jobId, jobKey) {
     /* progress UI loop, shared by startReview and refresh-reattachment;
        resolves with the full review result. */
     let lastStage = "";
     for (;;) {
       await new Promise((r) => setTimeout(r, 700));
-      const st = await api(`/api/review/status/${jobId}`);
+      const st = await api(`/api/review/status/${jobId}?k=${encodeURIComponent(jobKey || "")}`);
       const stageStr = st.stageDetail || st.stage || "";
       let m = /^(engine|book) (\d+)\/(\d+)/.exec(stageStr);
       let note = "";
@@ -1627,7 +1646,7 @@
       if (st.stage !== lastStage) { $("progressStage").textContent = stageText(st.stage); lastStage = st.stage; }
       $("progressNote").textContent = note;
       if (st.status === "error") throw new Error(st.error || "analysis failed");
-      if (st.status === "done") return api(`/api/review/result/${jobId}`);
+      if (st.status === "done") return api(`/api/review/result/${jobId}?k=${encodeURIComponent(jobKey || "")}`);
     }
   }
 
@@ -1643,18 +1662,27 @@
     $("progressPane").hidden = false;
     $("serverStatus").classList.add("busy");
     try {
-      const { jobId } = await post("/api/review", {
+      const { jobId, jobKey } = await post("/api/review", {
         pgn, engine, depth: preset.depth, movetime: preset.movetime, multipv: 3,
       });
       // remembered so a refresh mid-review can reattach to the same job
-      try { localStorage.setItem("crs_job", jobId); } catch (e) { /* skip */ }
-      const res = await pollJob(jobId);
+      state.jobKey = jobKey || "";
+    try {
+      localStorage.setItem("crs_job", jobId);
+      if (jobKey) localStorage.setItem("crs_job_key", jobKey);
+    } catch (e) { /* skip */ }
+      const res = await pollJob(jobId, jobKey);
       $("progressFill").style.width = "100%";
       $("progressStage").textContent = "Loading review�";
       state._pgnMoves = res.moves.length;
       applyReview(res);
       hideModal();
-      try { if (localStorage.getItem("crs_job") === jobId) localStorage.removeItem("crs_job"); } catch (e) { /* skip */ }
+      try {
+        if (localStorage.getItem("crs_job") === jobId) {
+          localStorage.removeItem("crs_job");
+          localStorage.removeItem("crs_job_key");
+        }
+      } catch (e) { /* skip */ }
     } catch (e) {
       $("modalError").textContent = e.message || "Review failed";
       $("modalError").hidden = false;
@@ -1671,25 +1699,34 @@
      the progress UI and apply the finished result (server keeps the job alive) */
   async function maybeReattachJob() {
     let jobId = null;
-    try { jobId = localStorage.getItem("crs_job"); } catch (e) { /* skip */ }
+    let jobKey = "";
+    try {
+      jobId = localStorage.getItem("crs_job");
+      jobKey = localStorage.getItem("crs_job_key") || "";
+    } catch (e) { /* skip */ }
     if (!jobId) return false;
     let st = null;
-    try { st = await api(`/api/review/status/${jobId}`); } catch (e) { st = null; }
+    try { st = await api(`/api/review/status/${jobId}?k=${encodeURIComponent(jobKey || "")}`); } catch (e) { st = null; }
     if (!st || st.error || st.status === "error") {
-      try { localStorage.removeItem("crs_job"); } catch (e) { /* skip */ }
+      try { localStorage.removeItem("crs_job"); localStorage.removeItem("crs_job_key"); } catch (e) { /* skip */ }
       return false;
     }
     state.liveSuspended = true;
     if (st.status === "done") {
       try {
         if (localStorage.getItem("crs_job") === jobId) {
-          const res = await api(`/api/review/result/${jobId}`);
+          const res = await api(`/api/review/result/${jobId}?k=${encodeURIComponent(jobKey || "")}`);
           state._pgnMoves = res.moves.length;
           applyReview(res);
           toast("Review finished", 3000);
         }
       } catch (e) { /* keep whatever session was restored */ }
-      try { if (localStorage.getItem("crs_job") === jobId) localStorage.removeItem("crs_job"); } catch (e) { /* skip */ }
+      try {
+        if (localStorage.getItem("crs_job") === jobId) {
+          localStorage.removeItem("crs_job");
+          localStorage.removeItem("crs_job_key");
+        }
+      } catch (e) { /* skip */ }
       state.liveSuspended = false;
       state.live.fen = null;
       return true;
@@ -1699,14 +1736,19 @@
     $("progressPane").hidden = false;
     $("progressStage").textContent = "Resuming review�";
     try {
-      const res = await pollJob(jobId);
+      const res = await pollJob(jobId, jobKey);
       if (localStorage.getItem("crs_job") === jobId) {
         state._pgnMoves = res.moves.length;
         applyReview(res);
         hideModal();
       }
     } catch (e) { hideModal(); }
-    try { if (localStorage.getItem("crs_job") === jobId) localStorage.removeItem("crs_job"); } catch (e) { /* skip */ }
+    try {
+        if (localStorage.getItem("crs_job") === jobId) {
+          localStorage.removeItem("crs_job");
+          localStorage.removeItem("crs_job_key");
+        }
+      } catch (e) { /* skip */ }
     state.liveSuspended = false;
     state.live.fen = null;
     return true;
@@ -1728,7 +1770,7 @@
         const b = document.createElement("button");
         b.type = "button";
         b.className = "game-pick";
-        b.innerHTML = `<div class="t">${s.name}</div>`;
+        b.innerHTML = `<div class="t">${esc(s.name)}</div>`;
         b.onclick = async () => {
           const r = await api("/api/samples/" + encodeURIComponent(s.id));
           $("pgnText").value = r.pgn;
@@ -1749,7 +1791,7 @@
       const res = await post("/api/lichess/fetch", { username: user, max: 6 });
       const games = res.pgn.split("\n\n[Event ").map((g, i) => i === 0 ? g : "[Event " + g)
         .filter((g) => g.includes("1.") || g.includes("1 ..."));
-      if (!games.length) { el.innerHTML = `<p class="text-muted">No games found for ${user}.</p>`; return; }
+      if (!games.length) { el.innerHTML = `<p class="text-muted">No games found for ${esc(user)}.</p>`; return; }
       el.innerHTML = "";
       games.slice(0, 6).forEach((g, i) => {
         const white = (/^\[White "(.*)"\]/m.exec(g) || [])[1] || "?";
@@ -1759,7 +1801,7 @@
         const b = document.createElement("button");
         b.type = "button";
         b.className = "game-pick";
-        b.innerHTML = `<div class="t">${white} vs ${black} ${result}</div><div class="s">${date}</div>`;
+        b.innerHTML = `<div class="t">${esc(white)} vs ${esc(black)} ${esc(result)}</div><div class="s">${esc(date)}</div>`;
         b.onclick = () => {
           $("pgnText").value = g.trim();
           el.querySelectorAll(".game-pick").forEach((x) => x.classList.remove("picked"));
@@ -1768,7 +1810,7 @@
         el.appendChild(b);
       });
     } catch (e) {
-      el.innerHTML = `<p class="text-muted">${e.message}</p>`;
+      el.innerHTML = `<p class="text-muted">${esc(e.message)}</p>`;
     }
   }
 
@@ -1786,8 +1828,8 @@
         const b = document.createElement("button");
         b.type = "button";
         b.className = "game-pick";
-        b.innerHTML = `<div class="t">${g.white} vs ${g.black} ${g.result}</div>
-          <div class="s">${g.timeClass} � ${g.date} � ${g.whiteRating ?? "?"} vs ${g.blackRating ?? "?"}</div>`;
+        b.innerHTML = `<div class="t">${esc(g.white)} vs ${esc(g.black)} ${esc(g.result)}</div>
+          <div class="s">${esc(g.timeClass)} � ${esc(g.date)} � ${esc(g.whiteRating ?? "?")} vs ${esc(g.blackRating ?? "?")}</div>`;
         b.onclick = () => {
           $("pgnText").value = g.pgn;
           el.querySelectorAll(".game-pick").forEach((x) => x.classList.remove("picked"));
@@ -1796,7 +1838,7 @@
         el.appendChild(b);
       });
     } catch (e) {
-      el.innerHTML = `<p class="text-muted">${e.message}</p>`;
+      el.innerHTML = `<p class="text-muted">${esc(e.message)}</p>`;
     }
   }
 
@@ -2091,7 +2133,7 @@
 
   function paintTrainerStats(d) {
     const cell = (v, label, cls) =>
-      `<div class="tr-stat ${cls || ""}"><b>${v}</b><span>${label}</span></div>`;
+      `<div class="tr-stat ${esc(cls || "")}"><b>${esc(v)}</b><span>${esc(label)}</span></div>`;
     $("trHeroStats").innerHTML =
       cell(d.due ?? 0, "due now", "hot") +
       cell(d.new ?? 0, "new", "ok") +
@@ -2762,7 +2804,7 @@
         <span class="lab-game-res ${cls}">${label}</span>
         <span><div class="lab-game-name">${labEscape(g.white)} vs ${labEscape(g.black)}</div>
           <div class="lab-game-meta">${labEscape(g.opening)} · ${labEscape(g.date || "?")} · ${labEscape(g.tcBucket)}</div></span>
-        <button class="lab-game-del" data-id="${g.id}" type="button" aria-label="Delete">&#10005;</button>
+        <button class="lab-game-del" data-id="${escAttr(g.id)}" type="button" aria-label="Delete">&#10005;</button>
       </div>`;
     }).join("");
     el.querySelectorAll(".lab-game-del").forEach((b) => {
@@ -3543,7 +3585,7 @@
         <div class="quiz-results">${q.results.map((r, n) => {
           const m = state.review.moves[r.idx];
           return `<div class="quiz-res-row">${m.moveNumber}${m.color === "white" ? "." : "..."} ${m.san}
-            ${q.drill ? `${smallChip(m.class)} ` : ""}<span class="chip cls-${r.grade}">${badgeSymbol(r.grade) || "?"}</span> ${r.label}${r.hint ? ` <span class="q-hint-mark">(hint)</span>` : ""}</div>`;
+            ${q.drill ? `${smallChip(m.class)} ` : ""}<span class="chip cls-${esc(r.grade)}">${badgeSymbol(r.grade) || "?"}</span> ${esc(r.label)}${r.hint ? ` <span class="q-hint-mark">(hint)</span>` : ""}</div>`;
         }).join("")}</div>
         <div class="ed-btns"><button class="btn btn-sm" id="qClose" type="button">Back to review</button>
           ${q.drill ? `<button class="btn btn-primary btn-sm" id="qRetry" type="button">Retry drill</button>` : ""}</div>`;
@@ -3551,7 +3593,7 @@
       const qnum = q.drill
         ? `<div class="quiz-top"><b>${TARGET_SVG} Fix your ${mv.label.toLowerCase()}</b>
             <span class="text-muted">Mistake ${q.k + 1}/${q.plies.length}</span></div>
-          <div class="quiz-score">Game played: <b>${mv.san}</b> ${smallChip(mv.class)} � Score <b>${q.score}</b> / ${q.max}</div>`
+          <div class="quiz-score">Game played: <b>${esc(mv.san)}</b> ${smallChip(mv.class)} � Score <b>${q.score}</b> / ${q.max}</div>`
         : `<div class="quiz-top"><b>${TARGET_SVG} Find the best move for ${Side}</b>
         <span class="text-muted">Question ${q.k + 1}/${q.plies.length}</span></div>
         <div class="quiz-score">Score <b>${q.score}</b> / ${q.max}</div>`;
@@ -3789,6 +3831,10 @@
   async function accDoLogout() {
     try { await post("/api/auth/logout", {}); } catch (e) { /* token may be gone */ }
     accStore("", null);
+    accPushed = {};
+    accPushedFor = "";
+    libUseAccountKey();   // back to the guest library - no account games on screen
+    renderLibrary();
     accPaintAccount();
     accNoteSignedIn("", false);
     toast("Signed out - progress stays on this device", 3500);
@@ -3798,25 +3844,39 @@
 
   /* ---------------- game library ---------------- */
   const LIB_KEY = "crs_library";
+  /* The saved games live under a per-account key: signing in as somebody
+     else (or signing out) must never show the previous account's games. */
+  let LIB_STORE_KEY = LIB_KEY;
+  function libStoreKey() {
+    const u = accUser();
+    return (u && u.id) ? LIB_KEY + "_" + u.id : LIB_KEY;
+  }
+  function libUseAccountKey() {
+    const k = libStoreKey();
+    if (k === LIB_STORE_KEY) return;
+    LIB_STORE_KEY = k;
+  }
   /* A review is ~70 KB of JSON, so the browser's ~5-12 MB localStorage holds
      dozens of games comfortably; the account copy has no such limit. 60 keeps
      the sync payload sane while being 7x the old cap. */
   const LIB_MAX = 60;
 
   function libLoad() {
-    try { return JSON.parse(localStorage.getItem(LIB_KEY) || "[]"); } catch (e) { return []; }
+    libUseAccountKey();
+    try { return JSON.parse(localStorage.getItem(LIB_STORE_KEY) || "[]"); } catch (e) { return []; }
   }
   function libSave(list) {
+    libUseAccountKey();
     const capped = list.slice(0, LIB_MAX);
     try {
-      localStorage.setItem(LIB_KEY, JSON.stringify(capped));
+      localStorage.setItem(LIB_STORE_KEY, JSON.stringify(capped));
       return true;
     } catch (e) {
       // out of quota: keep as many of the newest as actually fit instead of
       // losing the whole library
       for (let n = capped.length - 1; n > 0; n--) {
         try {
-          localStorage.setItem(LIB_KEY, JSON.stringify(capped.slice(0, n)));
+          localStorage.setItem(LIB_STORE_KEY, JSON.stringify(capped.slice(0, n)));
           toast(`Storage is full - kept the ${n} most recent game(s)`, 4000);
           return true;
         } catch (e2) { /* try fewer */ }
@@ -3867,7 +3927,7 @@
     if (!list.length) {
       const q = (($("libSearch") && $("libSearch").value) || "").trim();
       el.innerHTML = `<div class="empty-hint small">${q
-        ? `No saved games match "${q.replace(/[<>&"]/g, "")}".`
+        ? `No saved games match "${esc(q)}".`
         : `No saved games yet. Analyze a game, then click "Save current game".`}</div>`;
       return;
     }
@@ -3876,9 +3936,9 @@
       const acc = `${r.players.white.accuracy}% / ${r.players.black.accuracy}%`;
       const meta = [r.game.opening, r.game.Result, new Date(g.savedAt).toLocaleDateString()]
         .filter(Boolean).join(" � ");
-      return `<div class="lib-row" data-id="${g.id}">
-        <div><div class="lib-name">${libGameName(g)}</div><div class="lib-sub">${meta}</div></div>
-        <span class="lib-acc">${acc}<br><small>accuracy</small></span>
+      return `<div class="lib-row" data-id="${escAttr(g.id)}">
+        <div><div class="lib-name">${esc(libGameName(g))}</div><div class="lib-sub">${esc(meta)}</div></div>
+        <span class="lib-acc">${esc(acc)}<br><small>accuracy</small></span>
         <span class="lib-actions">
           <button class="btn btn-xs lib-open" type="button">Open</button>
           <button class="btn btn-xs lib-del" type="button" aria-label="Delete saved game">?</button>
@@ -3960,7 +4020,7 @@
     state.repCurrent = res;
     if (res.rootFen) $("repRoot").value = "current";
     else $("repRoot").value = "start";
-    $("repSummary").innerHTML = `<b>${res.lines.length}</b> lines for <b>${res.side}</b> (${res.mode}) �
+    $("repSummary").innerHTML = `<b>${res.lines.length}</b> lines for <b>${esc(res.side)}</b> (${esc(res.mode)}) �
       ${res.stats.queries} database positions checked � ${res.stats.evals ? res.stats.evals + " engine checks" : "explorer stats only"}`;
     if (!res.lines.length) {
       $("repLines").innerHTML = `<div class="empty-hint small">No lines could be built for these settings.
@@ -4125,7 +4185,7 @@
       const res = await api("/api/repertoire/list");
       state.repSaved = res.repertoires || [];
     } catch (e) {
-      el.innerHTML = `<div class="empty-hint small">Could not load saved repertoires: ${e.message}</div>`;
+      el.innerHTML = `<div class="empty-hint small">Could not load saved repertoires: ${esc(e.message)}</div>`;
       return;
     }
     if (!state.repSaved.length) {
@@ -4133,8 +4193,8 @@
       return;
     }
     el.innerHTML = state.repSaved.map((g) => `
-      <div class="lib-row" data-id="${g.id}">
-        <div><div class="lib-name rep-name" data-id="${g.id}">${g.name}</div>
+      <div class="lib-row" data-id="${escAttr(g.id)}">
+        <div><div class="lib-name rep-name" data-id="${escAttr(g.id)}">${esc(g.name)}</div>
           <div class="lib-sub">${g.side} � ${g.mode} � ${g.lines} lines � ${new Date(g.updatedAt * 1000).toLocaleDateString()}</div></div>
         <span class="lib-actions">
           <button class="btn btn-xs rep-open" type="button">Open</button>
@@ -4170,7 +4230,7 @@
         const nameEl = row.querySelector(".rep-name");
         if (nameEl.querySelector("input")) return;
         const old = nameEl.textContent;
-        nameEl.innerHTML = `<input class="input rep-name-input" value="${old.replace(/"/g, "&quot;")}">`;
+        nameEl.innerHTML = `<input class="input rep-name-input" value="${escAttr(old)}">`;
         const input = nameEl.querySelector("input");
         input.focus(); input.select();
         const commit = async () => {
@@ -4198,7 +4258,7 @@
     $("repStatus").textContent = "Building repertoire...";
     $("repBuild").disabled = true;
     try {
-      const { jobId } = await post("/api/repertoire/build", {
+      const { jobId, jobKey } = await post("/api/repertoire/build", {
         fen,
         side: $("repSide").value,
         mode: $("repMode").value,
@@ -4209,12 +4269,12 @@
       let done = false, last = "";
       while (!done) {
         await sleep(600);
-        const st = await api(`/api/repertoire/status/${jobId}`);
+        const st = await api(`/api/repertoire/status/${jobId}?k=${encodeURIComponent(jobKey || "")}`);
         if (st.stage && st.stage !== last) { $("repStatus").textContent = "Building: " + st.stage; last = st.stage; }
         if (st.status === "error") throw new Error(st.error || "build failed");
         if (st.status === "done") done = true;
       }
-      const res = await api(`/api/repertoire/result/${jobId}`);
+      const res = await api(`/api/repertoire/result/${jobId}?k=${encodeURIComponent(jobKey || "")}`);
       repPaint(res);
       if (res.lines.length) {
         $("repStatus").hidden = false;
