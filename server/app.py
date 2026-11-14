@@ -179,9 +179,9 @@ def api_auth_status():
 @app.post("/api/auth/register")
 def api_auth_register():
     ip = _client_ip()
-    if not security.limiter.allow("register:" + ip, 5, 3600):
+    if not security.limiter.allow("register:" + ip, 10, 3600):
         security.log_event("register_rate_limited", ip=ip)
-        return _rate("register:" + ip, 5, 3600)
+        return _rate("register:" + ip, 10, 3600)
     data = request.get_json(force=True, silent=True) or {}
     try:
         res = accounts.register(data.get("username") or "", data.get("password") or "",
