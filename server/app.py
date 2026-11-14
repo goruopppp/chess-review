@@ -23,7 +23,39 @@ repstore.init_db()
 
 from server import accounts  # noqa: E402
 from server import db as _db  # noqa: E402
+from server import mailer  # noqa: E402
+from server import security  # noqa: E402
 accounts.init_db()
+
+# The app loads nothing from another origin (every fetch is same-origin), so a
+# strict policy costs nothing and neutralises any HTML injection that slips
+# through: no inline script, no framing, no form posts elsewhere.
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:; "
+       "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'")
+
+# largest PGN we accept in one request (characters) - the engine work scales
+# with the game, so an unbounded body is a denial-of-service lever
+MAX_PGN_CHARS = 400_000
+MAX_REVIEW_JOBS = 24
+
+
+@app.after_request
+def add_security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("Permissions-Policy",
+                            "geolocation=(), microphone=(), camera=(), interest-cohort=()")
+    resp.headers.setdefault("Content-Security-Policy", CSP)
+    if request.is_secure:
+        resp.headers.setdefault("Strict-Transport-Security",
+                                "max-age=31536000; includeSubDomains")
+    if request.path.startswith("/api/"):
+        # authenticated responses must never be stored by a shared cache
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+        resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 def _bearer(req):
@@ -39,6 +71,83 @@ def _uid():
     return accounts.uid_from_request(request)
 
 
+def _client_ip():
+    """Best-effort client address for rate limiting.
+
+    X-Forwarded-For is only trusted when the app is behind a proxy that sets
+    it (Render does). A client can spoof it, which only weakens the limiter
+    - it never grants access - so it is combined with the account lockout.
+    """
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return fwd.split(",")[0].strip()[:64]
+    return (request.remote_addr or "unknown")[:64]
+
+
+def _rate(key, limit, window):
+    """A 429 response with a Retry-After header (never a bare bool)."""
+    resp = jsonify({"error": "Too many requests - please slow down"})
+    resp.status_code = 429
+    retry = security.limiter.retry_after(key, window)
+    if retry:
+        resp.headers["Retry-After"] = str(retry)
+    return resp
+
+
+def _job_owner_ok(job, key):
+    """A job result is private to whoever started it.
+
+    The job carries a random 'key'; a signed-in caller must ALSO be the
+    account that started it. Guests are protected by the key alone (the
+    review data of a signed-out visitor is still their own PGN).
+    """
+    if not job:
+        return False
+    if not hmac_compare(job.get("key"), key or ""):
+        return False
+    owner = job.get("owner")
+    if owner:
+        return accounts.uid_from_request(request) == owner
+    return True
+
+
+def hmac_compare(a, b):
+    import hmac
+    return bool(a) and bool(b) and hmac.compare_digest(str(a), str(b))
+
+
+def _housekeeping_loop():
+    """Drop expired sessions and reset tokens every 10 minutes."""
+    while True:
+        time.sleep(600)
+        try:
+            res = accounts.purge_expired()
+            if res.get("sessions") or res.get("resets"):
+                security.log_event("purged_expired", sessions=res.get("sessions"),
+                                   resets=res.get("resets"))
+        except Exception:
+            pass
+
+
+threading.Thread(target=_housekeeping_loop, daemon=True).start()
+
+
+def _is_chesscom_archive(url):
+    """Only chess.com's own HTTPS archive endpoints may be followed.
+
+    The URL comes from an API response, not from the caller - but following a
+    URL that a (compromised or spoofed) API hands us would turn the server
+    into a request proxy, so the host is pinned.
+    """
+    try:
+        from urllib.parse import urlsplit
+        u = urlsplit(url or "")
+        return (u.scheme == "https" and u.hostname == "api.chess.com"
+                and u.path.startswith("/pub/archives"))
+    except Exception:
+        return False
+
+
 # ---------------- accounts ----------------
 @app.get("/api/auth/status")
 def api_auth_status():
@@ -48,12 +157,18 @@ def api_auth_status():
 
 @app.post("/api/auth/register")
 def api_auth_register():
+    ip = _client_ip()
+    if not security.limiter.allow("register:" + ip, 5, 3600):
+        security.log_event("register_rate_limited", ip=ip)
+        return _rate("register:" + ip, 5, 3600)
     data = request.get_json(force=True, silent=True) or {}
     try:
-        res = accounts.register(data.get("username") or "", data.get("password") or "")
+        res = accounts.register(data.get("username") or "", data.get("password") or "",
+                                data.get("email") or "")
         return jsonify(res)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+    except accounts.AuthError as e:
+        security.log_event("register_failed", ip=ip, reason=str(e)[:60])
+        return jsonify({"error": e.message}), e.status
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"register failed: {e}"}), 500
@@ -61,15 +176,28 @@ def api_auth_register():
 
 @app.post("/api/auth/login")
 def api_auth_login():
+    ip = _client_ip()
+    ident = (request.get_json(force=True, silent=True) or {}).get("identifier") or ""
+    ident = str(ident)
+    # per-client throttle + per-account lockout (in the accounts table)
+    if not security.limiter.allow("login-ip:" + ip, 30, 300):
+        security.log_event("login_rate_limited", ip=ip)
+        return _rate("login-ip:" + ip, 30, 300)
+    if ident:
+        if not security.limiter.allow("login-user:" + ident.lower(), 10, 300):
+            security.log_event("login_rate_limited", user=ident[:24], ip=ip)
+            return _rate("login-user:" + ident.lower(), 10, 300)
     data = request.get_json(force=True, silent=True) or {}
+    ident = data.get("identifier") or data.get("username") or data.get("email") or ""
     try:
-        res = accounts.login(data.get("username") or "", data.get("password") or "")
+        res = accounts.login(str(ident), data.get("password") or "", ip=ip,
+                              user_agent=request.headers.get("User-Agent", ""))
         return jsonify(res)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 401
+    except accounts.AuthError as e:
+        return jsonify({"error": e.message}), e.status
     except Exception as e:
         traceback.print_exc()
-        return jsonify({"error": f"login failed: {e}"}), 500
+        return jsonify({"error": "login failed"}), 500
 
 
 @app.post("/api/auth/logout")
@@ -83,6 +211,79 @@ def api_auth_me():
     token = _bearer(request)
     user = accounts.me(token)
     return jsonify({"user": user, "remote": bool(_db.REMOTE_ENABLED)})
+
+
+@app.post("/api/auth/password")
+def api_auth_password():
+    """Change the password of the signed-in account (reauthentication)."""
+    token = _bearer(request)
+    uid = accounts.uid_from_token(token)
+    if not uid:
+        return jsonify({"error": "not signed in"}), 401
+    ip = _client_ip()
+    if not security.limiter.allow("pwchange:" + ip, 10, 3600):
+        return _rate("pwchange:" + ip, 10, 3600)
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        res = accounts.change_password(uid, data.get("currentPassword") or "",
+                                       data.get("newPassword") or "", keep_token=token)
+        return jsonify(res)
+    except accounts.AuthError as e:
+        return jsonify({"error": e.message}), e.status
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": "password change failed"}), 500
+
+
+@app.post("/api/auth/password-reset")
+def api_auth_password_reset():
+    """Start a password reset. Always the same answer, whatever the input."""
+    ip = _client_ip()
+    if not security.limiter.allow("pwreset:" + ip, 5, 3600):
+        return _rate("pwreset:" + ip, 5, 3600)
+    data = request.get_json(force=True, silent=True) or {}
+    ident = str(data.get("identifier") or data.get("email") or data.get("username") or "")
+    try:
+        res = accounts.request_password_reset(ident)
+    except Exception:
+        traceback.print_exc()
+        res = {"ok": True}
+    token = res.get("token") or ""
+    if token:
+        # deliver the single-use link (only when mail is configured)
+        row = None
+        try:
+            conn = accounts._connect()
+            row = conn.execute("SELECT email FROM users WHERE id = ?",
+                               (res.get("uid"),)).fetchone()
+        except Exception:
+            row = None
+        email = (row[0] if row else "") or ""
+        if email and mailer.configured():
+            base = os.environ.get("PUBLIC_URL") or "https://chess-review-1.onrender.com"
+            link = "%s/?reset=%s" % (base.rstrip("/"), token)
+            mailer.send(email, "Reset your chess-review password",
+                        "Use this link to choose a new password (valid 30 minutes):\n\n%s\n\n"
+                        "If you did not ask for this, you can ignore this email." % link)
+    return jsonify({"ok": True,
+                    "message": "If that account exists, a reset link has been sent."})
+
+
+@app.post("/api/auth/password-reset/confirm")
+def api_auth_password_reset_confirm():
+    ip = _client_ip()
+    if not security.limiter.allow("pwresetc:" + ip, 10, 3600):
+        return _rate("pwresetc:" + ip, 10, 3600)
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        res = accounts.reset_password(str(data.get("token") or ""),
+                                      data.get("newPassword") or "")
+        return jsonify(res)
+    except accounts.AuthError as e:
+        return jsonify({"error": e.message}), e.status
+    except Exception:
+        traceback.print_exc()
+        return jsonify({"error": "reset failed"}), 500
 
 
 # ---------------- per-account game library ----------------
@@ -220,19 +421,29 @@ def api_engines():
 
 @app.post("/api/settings")
 def api_settings():
+    """Engine resources are shared by everyone, so the values are clamped to
+    what one instance can afford and the endpoint is rate limited."""
+    ip = _client_ip()
+    if not security.limiter.allow("settings:" + ip, 20, 300):
+        return _rate("settings:" + ip, 20, 300)
     data = request.get_json(force=True, silent=True) or {}
-    threads = max(1, min(16, int(data.get("threads", 1))))
-    hash_mb = max(16, min(2048, int(data.get("hash", 256))))
+    threads = max(1, min(4, int(data.get("threads", 1))))
+    hash_mb = max(16, min(512, int(data.get("hash", 256))))
     manager.set_defaults(threads, hash_mb)
     return jsonify({"ok": True, "threads": threads, "hash": hash_mb})
 
 
 @app.post("/api/review")
 def api_review():
+    ip = _client_ip()
+    if not security.limiter.allow("review:" + ip, 30, 300):
+        return _rate("review:" + ip, 30, 300)
     data = request.get_json(force=True, silent=True) or {}
     pgn = (data.get("pgn") or "").strip()
     if not pgn:
         return jsonify({"error": "Missing PGN text."}), 400
+    if len(pgn) > MAX_PGN_CHARS:
+        return jsonify({"error": "That PGN is too large to analyse."}), 413
     engine_id = data.get("engine") or "stockfish"
     engine = manager.get(engine_id)
     depth = max(4, min(22, int(data.get("depth", 12))))
@@ -240,13 +451,16 @@ def api_review():
     movetime = max(200, min(20000, int(data.get("movetime", 900))))
 
     job_id = uuid.uuid4().hex[:12]
+    job_key = security.random_token(24)
+    owner = _uid()          # '' for a guest - the key is then the only guard
     with _jobs_lock:
-        # keep only the 6 most recent jobs
-        for old in sorted(_jobs, key=lambda k: _jobs[k].get("startedAt", 0))[:-6]:
+        # keep only the most recent jobs
+        for old in sorted(_jobs, key=lambda k: _jobs[k].get("startedAt", 0))[:-MAX_REVIEW_JOBS]:
             if _jobs[old].get("status") in ("done", "error"):
                 _jobs.pop(old, None)
         _jobs[job_id] = {"status": "running", "stage": "starting", "progress": 0.0,
                          "startedAt": time.time(), "result": None, "error": None,
+                         "key": job_key, "owner": owner,
                          "engine": getattr(engine, "name", engine_id)}
 
     def progress(msg):
@@ -281,14 +495,15 @@ def api_review():
                     _jobs[job_id].update(status="error", error=f"{type(e).__name__}: {e}")
 
     threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"jobId": job_id, "engine": getattr(engine, "name", engine_id)})
+    return jsonify({"jobId": job_id, "jobKey": job_key,
+                    "engine": getattr(engine, "name", engine_id)})
 
 
 @app.get("/api/review/status/<job_id>")
 def api_review_status(job_id):
     with _jobs_lock:
         job = _jobs.get(job_id)
-        if not job:
+        if not job or not _job_owner_ok(job, request.args.get("k")):
             return jsonify({"error": "unknown job"}), 404
         return jsonify({k: job.get(k) for k in ("status", "stage", "stageDetail", "progress", "error", "engine")})
 
@@ -297,7 +512,7 @@ def api_review_status(job_id):
 def api_review_result(job_id):
     with _jobs_lock:
         job = _jobs.get(job_id)
-        if not job:
+        if not job or not _job_owner_ok(job, request.args.get("k")):
             return jsonify({"error": "unknown job"}), 404
         if job["status"] == "error":
             return jsonify({"error": job["error"]}), 500
@@ -364,12 +579,17 @@ def api_eval():
 @app.post("/api/chesscom/fetch")
 def api_chesscom_fetch():
     """Fetch a user's recent games from chess.com's public API (monthly archives)."""
+    ip = _client_ip()
+    if not security.limiter.allow("ccfetch:" + ip, 20, 300):
+        return _rate("ccfetch:" + ip, 20, 300)
     data = request.get_json(force=True, silent=True) or {}
     username = (data.get("username") or "").strip().lstrip("@").lower()
     max_games = max(1, min(20, int(data.get("max", 8))))
     time_class = (data.get("timeClass") or "").strip().lower()
     if not username:
         return jsonify({"error": "Missing username."}), 400
+    if not security.valid_external_username(username):
+        return jsonify({"error": "That is not a valid chess.com username."}), 400
     import datetime as _dt
 
     import requests as rq
@@ -382,6 +602,9 @@ def api_chesscom_fetch():
         for url in reversed(arch.json().get("archives", [])):
             if len(games) >= max_games:
                 break
+            # only follow chess.com's own archive URLs - never an arbitrary host
+            if not _is_chesscom_archive(url):
+                continue
             month = rq.get(url, headers=headers, timeout=30)
             month.raise_for_status()
             for g in reversed(month.json().get("games", [])):
@@ -445,9 +668,26 @@ def api_explorer():
 
 @app.post("/api/lichess_token")
 def api_lichess_token():
+    """Store the shared Lichess API token (used by the opening explorer).
+
+    The token is a server-wide resource, so it is only accepted in the
+    exact format Lichess issues and writes are rate limited. The token
+    itself is never returned by the API.
+    """
+    ip = _client_ip()
+    if not security.limiter.allow("ltoken:" + ip, 10, 3600):
+        return _rate("ltoken:" + ip, 10, 3600)
     from server import openings
     data = request.get_json(force=True, silent=True) or {}
-    openings.set_token(data.get("token"))
+    tok = (data.get("token") or "").strip()
+    if tok:
+        if len(tok) != 32 or any(c not in "0123456789abcdefABCDEF" for c in tok):
+            return jsonify({"error": "That does not look like a Lichess API token"}), 400
+        openings.set_token(tok)
+        security.log_event("lichess_token_set", ip=ip)
+    else:
+        openings.set_token("")
+        security.log_event("lichess_token_cleared", ip=ip)
     return jsonify({"ok": True, "set": openings.has_token()})
 
 
@@ -714,10 +954,15 @@ def api_rep_build():
     except Exception:
         return jsonify({"error": "invalid FEN"}), 400
     job_id = uuid.uuid4().hex[:12]
+    job_key = security.random_token(24)
+    owner = _uid()
     use_engine = bool(data.get("useEngine")) or mode == "strongest"
     with _rjobs_lock:
+        for old in sorted(_rjobs, key=lambda k: _rjobs[k].get("startedAt", 0))[:-MAX_REVIEW_JOBS]:
+            if _rjobs[old].get("status") in ("done", "error"):
+                _rjobs.pop(old, None)
         _rjobs[job_id] = {"status": "running", "stage": "starting", "result": None, "error": None,
-                          "startedAt": time.time()}
+                          "startedAt": time.time(), "key": job_key, "owner": owner}
 
     def progress(stage):
         with _rjobs_lock:
@@ -743,14 +988,14 @@ def api_rep_build():
                     _rjobs[job_id].update(status="error", error=f"{type(e).__name__}: {e}")
 
     threading.Thread(target=worker, daemon=True).start()
-    return jsonify({"jobId": job_id})
+    return jsonify({"jobId": job_id, "jobKey": job_key})
 
 
 @app.get("/api/repertoire/status/<job_id>")
 def api_rep_status(job_id):
     with _rjobs_lock:
         job = _rjobs.get(job_id)
-        if not job:
+        if not job or not _job_owner_ok(job, request.args.get("k")):
             return jsonify({"error": "unknown job"}), 404
         return jsonify({k: job.get(k) for k in ("status", "stage", "error")})
 
@@ -759,7 +1004,7 @@ def api_rep_status(job_id):
 def api_rep_result(job_id):
     with _rjobs_lock:
         job = _rjobs.get(job_id)
-        if not job:
+        if not job or not _job_owner_ok(job, request.args.get("k")):
             return jsonify({"error": "unknown job"}), 404
         if job["status"] == "error":
             return jsonify({"error": job["error"]}), 500
@@ -793,12 +1038,20 @@ def api_sample(name):
 @app.post("/api/lichess/fetch")
 def api_lichess_fetch():
     """Fetch a user's latest game PGN from Lichess."""
+    ip = _client_ip()
+    if not security.limiter.allow("lcfetch:" + ip, 20, 300):
+        return _rate("lcfetch:" + ip, 20, 300)
     data = request.get_json(force=True, silent=True) or {}
     username = (data.get("username") or "").strip()
     max_games = max(1, min(10, int(data.get("max", 5))))
     speeds = data.get("speeds") or []
     if not username:
         return jsonify({"error": "Missing username."}), 400
+    if not security.valid_external_username(username):
+        return jsonify({"error": "That is not a valid Lichess username."}), 400
+    if not isinstance(speeds, list):
+        speeds = []
+    speeds = [str(s) for s in speeds if str(s) in ("bullet", "blitz", "rapid", "classical")][:4]
     import requests as rq
     try:
         params = {"max": max_games, "moves": "false", "tags": "true", "clocks": "true", "evals": "false"}
