@@ -686,6 +686,6 @@ def run_review(pgn_text, engine, depth=12, multipv=3, movetime=900, progress=Non
         "graph": graph,
         "annotatedPgn": annotated_pgn,
         "pgnWarnings": pgn_warnings,
-        "analysis": {"accV": 2, "clsV": 2, "engine": getattr(engine, "name", "?"), "depth": depth,
+        "analysis": {"accV": 3, "clsV": 2, "engine": getattr(engine, "name", "?"), "depth": depth,
                      "multipv": multipv, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")},
     }
