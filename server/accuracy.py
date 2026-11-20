@@ -1,7 +1,8 @@
-"""Accuracy + Expected Points model (CAPS2-style, deliberately stricter).
+"""Accuracy + Expected Points model (CAPS2-style, chess.com-aligned).
 
 Mathematical model (an approximation of chess.com's CAPS2 principles, NOT the
-undisclosed exact formula, recalibrated v82 to punish mistakes harder):
+undisclosed exact formula; recalibrated v86 to match chess.com's accuracy
+scale):
 
 1. Expected Points (EP, 0..1) from the mover-perspective evaluation:
      EP(cp) = 1 / (1 + e^(-0.00368208 * cp))       # the published logistic
@@ -9,9 +10,12 @@ undisclosed exact formula, recalibrated v82 to punish mistakes harder):
 2. Expected Points Lost per move:
      EPL = max(0, EP(before, best move) - EP(after, played move))
 3. Per-move accuracy is a weighted geometric mean of two penalised curves:
-     acc_EPL = 100 * e^(-4.2  * EPL)        # outcome damage (steepened v82)
-     acc_CPL = 100 * e^(-CPL / 70)          # centipawn loss (tightened v82; cap 1200)
+     acc_EPL = 100 * e^(-1.6  * EPL)        # outcome damage
+     acc_CPL = 100 * e^(-CPL / 600)         # centipawn loss (cap 1200)
      acc     = acc_EPL^0.55 * acc_CPL^0.45  # 0.55 outcome / 0.45 material
+   Anchors match chess.com's public scale: an excellent move (EPL 0.02,
+   30cp) reads ~96, good (0.05, 80cp) ~90, inaccuracy (0.10, 160cp) ~81,
+   mistake (0.20, 320cp) ~66, blunder (0.35, 550cp) ~49.
    The CPL component keeps bad moves in already-lost positions honest (the
    logistic flattens there, so EP-loss alone would let shuffling score ~100).
 4. Game accuracy = severity-weighted mean of the per-move accuracies: moves
@@ -34,9 +38,9 @@ EPL_GOOD = 0.05
 EPL_INACCURACY = 0.10
 EPL_MISTAKE = 0.20
 
-# accuracy-from-EPL steepness / CPL softness / blend weights
-EPL_STEEPNESS = 4.2
-CPL_SCALE = 70.0
+# accuracy-from-EPL steepness / CPL softness / blend weights (v86: chess.com scale)
+EPL_STEEPNESS = 1.6
+CPL_SCALE = 600.0
 W_EPL = 0.55
 W_CPL = 0.45
 HOPELESS_MATE_CAP = 70.0
@@ -103,13 +107,16 @@ def game_accuracy(drops_and_accs) -> float:
 def est_rating(accuracy: float) -> int:
     """Rough 'you played like a ...' mapping from game accuracy.
 
-    v82: keys shifted down to stay honest after the stricter scale (a game
-    that used to read ~87 now reads ~80, etc.)."""
+    v86: keys re-anchored through a monotone old->new accuracy map fitted on
+    real reviewed games, so the SAME play estimates the same rating on the new
+    (chess.com-aligned) scale. Elite games sit near 99.5 (the new curve's
+    near-perfect ceiling) and the 800 floor starts at the new scale's
+    theoretical minimum (~16.9, an all-max-loss game)."""
     table = [
-        (98.0, 2900), (97.0, 2700), (95.5, 2500), (94.0, 2350), (92.5, 2250),
-        (89.5, 2100), (86.5, 2000), (84.0, 1900), (80.5, 1800), (76.5, 1700),
-        (73.5, 1600), (70.0, 1500), (66.5, 1400), (62.0, 1300), (56.0, 1200),
-        (50.0, 1100), (40.0, 950), (0.0, 800),
+        (99.5, 2900), (99.2, 2700), (98.8, 2500), (98.4, 2350), (98.0, 2250),
+        (97.2, 2100), (96.3, 2000), (95.6, 1900), (94.6, 1800), (93.3, 1700),
+        (92.4, 1600), (91.3, 1500), (90.3, 1400), (89.2, 1300), (85.1, 1200),
+        (82.3, 1100), (74.5, 950), (16.9, 800),
     ]
     prev_acc, prev_elo = table[0]
     if accuracy >= prev_acc:
