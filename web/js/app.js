@@ -905,8 +905,9 @@
       const winB = winShare(cpB), winA = winShare(cpA);
       const drop = Math.max(0, winB - winA);
       const loss = Math.max(0, cpB - cpA);
-      // v82: steeper curve matching the recalibrated server accuracy scale
-      entry.accuracy = Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.054 * drop) - 3.1669));
+      // v86: gentle curve matching chess.com-aligned server accuracy
+      // (penalty ~0.021 * win%-drop, same blend as the server EPL curve)
+      entry.accuracy = Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.021 * drop) - 3.1669));
       const playedBest = before[0] && before[0].pv && before[0].pv[0] === entry.uci;
       // mate distances are compared directly: mate evals collapse the whole
       // "mate in N" spectrum to a flat value, so a slower mate must not grade
