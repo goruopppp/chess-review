@@ -1587,21 +1587,28 @@
     const el = $("explorerList");
     setExplorerSource(explorerSource());
     const fen = editor.active ? board.fen : currentFen();
-    if (!fen) { el.innerHTML = `<div class="empty-hint small">No position loaded.</div>`; return; }
+    if (!fen) {
+      explorerReqFen = null;   // never paint a late answer over "no position"
+      el.innerHTML = `<div class="empty-hint small">No position loaded.</div>`;
+      return;
+    }
     if (explorerSource() === "mine") { renderMyExplorer(fen); return; }
+    // Set the token before the cache check: jumping to a cached position must
+    // invalidate an older in-flight request for a different square.
+    const req = "masters|" + fen;
+    explorerReqFen = req;
     if (explorerCache.has(fen)) { paintExplorer(fen, explorerCache.get(fen)); return; }
     el.innerHTML = `<div class="empty-hint small">Looking up master games...</div>`;
     $("explorerOpening").textContent = "�";
     $("explorerMeta").textContent = "";
-    explorerReqFen = fen;
     clearTimeout(explorerTimer);
     explorerTimer = setTimeout(async () => {
       try {
         const res = await api("/api/explorer?fen=" + encodeURIComponent(fen));
         explorerCache.set(fen, res);
-        if (explorerReqFen === fen) paintExplorer(fen, res);
+        if (explorerReqFen === req) paintExplorer(fen, res);
       } catch (e) {
-        if (explorerReqFen === fen) {
+        if (explorerReqFen === req) {
           el.innerHTML = /token/i.test(e.message)
             ? `<div class="empty-hint small">Lichess now requires a (free) API token for the explorer.<br>
                Open <b>? settings</b> and paste a personal token from<br>lichess.org/account/oauth/token</div>`
@@ -1649,12 +1656,12 @@
     const el = $("explorerList");
     const side = getLabColor();
     const key = side + "|" + fen;
+    const req = "mine|" + key;
+    explorerReqFen = req;
     if (myExplorerCache.has(key)) { paintMyExplorer(fen, myExplorerCache.get(key)); return; }
     el.innerHTML = `<div class="empty-hint small">Looking through your games...</div>`;
     $("explorerOpening").textContent = "Your games";
     $("explorerMeta").textContent = "";
-    const req = "mine|" + key;
-    explorerReqFen = req;
     clearTimeout(explorerTimer);
     explorerTimer = setTimeout(async () => {
       try {
