@@ -1550,8 +1550,32 @@
 
   /* ---------------- opening explorer ---------------- */
   const explorerCache = new Map();
+  const myExplorerCache = new Map();   // v87: personal position stats
   let explorerTimer = null;
   let explorerReqFen = null;
+
+  function explorerSource() {
+    try { return localStorage.getItem("crs_exp_src") === "mine" ? "mine" : "masters"; }
+    catch (e) { return "masters"; }
+  }
+
+  function setExplorerSource(src) {
+    const v = src === "mine" ? "mine" : "masters";
+    try { localStorage.setItem("crs_exp_src", v); } catch (e) { /* private mode */ }
+    document.querySelectorAll("#explorerSource .exp-src-btn").forEach((b) => {
+      const on = b.dataset.src === v;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on);
+    });
+    const side = $("explorerSide");
+    if (side) side.hidden = v !== "mine";
+    const hint = $("explorerHint");
+    if (hint) {
+      hint.textContent = v === "mine"
+        ? "Your own results from this position, scored for the color above. Click a move to play it on the board."
+        : "Continuations from the Lichess masters database. Click a move to play it on the board.";
+    }
+  }
 
   function scheduleExplorer() {
     if (state.activeTab !== "explorer") return;
@@ -1561,8 +1585,10 @@
 
   async function renderExplorer() {
     const el = $("explorerList");
+    setExplorerSource(explorerSource());
     const fen = editor.active ? board.fen : currentFen();
     if (!fen) { el.innerHTML = `<div class="empty-hint small">No position loaded.</div>`; return; }
+    if (explorerSource() === "mine") { renderMyExplorer(fen); return; }
     if (explorerCache.has(fen)) { paintExplorer(fen, explorerCache.get(fen)); return; }
     el.innerHTML = `<div class="empty-hint small">Looking up master games...</div>`;
     $("explorerOpening").textContent = "�";
@@ -1607,6 +1633,99 @@
         <span class="exp-games">${(m.games || 0).toLocaleString()}</span>
       </div>`;
     }).join("") || `<div class="empty-hint small">No recorded continuations.</div>`;
+    document.querySelectorAll("#explorerList .exp-row").forEach((row) => {
+      row.onclick = () => {
+        const uci = row.dataset.uci;
+        const match = board.legal.find((m) => m.uci.startsWith(uci.slice(0, 4)));
+        if (match) onMoveAttempt(match, uci.slice(0, 2), uci.slice(2, 4));
+      };
+    });
+  }
+
+  /* v87: the same panel, sourced from the player's own games. One indexed
+     replay per account answers every position with real results, per-move
+     scores and the average accuracy of the moves actually played. */
+  async function renderMyExplorer(fen) {
+    const el = $("explorerList");
+    const side = getLabColor();
+    const key = side + "|" + fen;
+    if (myExplorerCache.has(key)) { paintMyExplorer(fen, myExplorerCache.get(key)); return; }
+    el.innerHTML = `<div class="empty-hint small">Looking through your games...</div>`;
+    $("explorerOpening").textContent = "Your games";
+    $("explorerMeta").textContent = "";
+    const req = "mine|" + key;
+    explorerReqFen = req;
+    clearTimeout(explorerTimer);
+    explorerTimer = setTimeout(async () => {
+      try {
+        const res = await api("/api/perf/position?fen=" + encodeURIComponent(fen) + "&color=" + side);
+        myExplorerCache.set(key, res);
+        if (explorerReqFen === req) paintMyExplorer(fen, res);
+      } catch (e) {
+        if (explorerReqFen === req) {
+          el.innerHTML = `<div class="empty-hint small">Could not load your games (${esc(e.message)}).</div>`;
+        }
+      }
+    }, 250);
+  }
+
+  function paintMyExplorer(fen, res) {
+    const side = res.me === "black" ? "black" : "white";
+    const turn = res.turn === "black" ? "black" : "white";
+    const n = res.positionGames || 0;
+    const total = res.totalGames || 0;
+    if (!n) {
+      $("explorerOpening").textContent = "No games here yet";
+      $("explorerMeta").textContent = total
+        ? `None of your ${total} saved game${total === 1 ? "" : "s"} reached this position as ${side}`
+        : "No saved games yet - import some in the Performance Lab";
+      $("explorerList").innerHTML = `<div class="empty-hint small">${total
+        ? "Browse an opening you actually play, or switch to <b>Masters</b> for theory from this position."
+        : "The Performance Lab imports your chess.com/Lichess games; this view then shows your real results from every position."}</div>`;
+      return;
+    }
+    const mineMove = turn === side;
+    const pct = (v) => {
+      if (v == null) return "-";
+      const x = Number(v);
+      return `${x % 1 ? x.toFixed(1) : x.toFixed(0)}%`;
+    };
+    const scoreCls = (v) => v == null ? "" : v >= 60 ? " good" : v >= 40 ? " mid" : " low";
+    const bar = (m) => {
+      const den = Math.max(1, m.games || 0);
+      const pw = ((m.wins || 0) / den) * 100;
+      const pd = ((m.draws || 0) / den) * 100;
+      const pl = ((m.losses || 0) / den) * 100;
+      return `<div class="wdl" title="${m.wins || 0} win / ${m.draws || 0} draw / ${m.losses || 0} loss"><span class="yw" style="width:${pw.toFixed(1)}%"></span><span class="d" style="width:${pd.toFixed(1)}%"></span><span class="yl" style="width:${pl.toFixed(1)}%"></span></div>`;
+    };
+    const sample = `${res.wins}W ${res.draws}D ${res.losses}L${res.unscored ? ` ${res.unscored}*` : ""}`;
+    $("explorerOpening").textContent = mineMove ? "Your move - your history" : "Opponent to move - your results";
+    $("explorerMeta").textContent = `${n} of ${total} games as ${side} - your score ${pct(res.score)} (${sample})`;
+    const sanMap = new Map(board.legal.map((m) => [m.uci.slice(0, 4), m.san]));
+    const rows = (res.moves || []).map((m) => {
+      const san = sanMap.get(m.uci.slice(0, 4)) || m.san || m.uci;
+      const acc = mineMove && m.accuracy != null
+        ? ` <em class="exp-acc" title="Average accuracy when you played this move">${Math.round(m.accuracy)}</em>` : "";
+      return `<div class="exp-row" data-uci="${m.uci}" title="${san}: ${m.games} game${m.games === 1 ? "" : "s"}${mineMove ? "" : " by your opponents"}">
+        <span class="exp-san">${san}${acc}</span>
+        <span class="exp-pct${scoreCls(m.score)}">${pct(m.score)}</span>
+        ${bar(m)}
+        <span class="exp-games">${m.games}</span>
+      </div>`;
+    }).join("") || `<div class="empty-hint small">No continuations recorded.</div>`;
+    const recent = (res.recent || []).slice(0, 3).map((g) => {
+      const myWin = (g.result === "1-0" && side === "white") || (g.result === "0-1" && side === "black");
+      const myLoss = (g.result === "1-0" && side === "black") || (g.result === "0-1" && side === "white");
+      const cls = myWin ? "win" : myLoss ? "loss" : "";
+      const label = g.result === "1-0" ? "1-0" : g.result === "0-1" ? "0-1" : g.result === "1/2-1/2" ? "1/2" : "?";
+      return `<div class="exp-recent-row" title="${esc(g.opening || "")}">
+        <span class="exp-recent-res ${cls}">${label}</span>
+        <span class="exp-recent-names">${esc(g.white)} vs ${esc(g.black)}</span>
+        <span class="exp-recent-date">${esc(g.date || "")}</span>
+      </div>`;
+    }).join("");
+    $("explorerList").innerHTML = rows + (recent
+      ? `<div class="exp-recent"><div class="exp-recent-title">Recent games here</div>${recent}</div>` : "");
     document.querySelectorAll("#explorerList .exp-row").forEach((row) => {
       row.onclick = () => {
         const uci = row.dataset.uci;
@@ -2614,8 +2733,12 @@
     document.querySelectorAll("#labColorToggle .lab-seg").forEach((b) => {
       b.classList.toggle("active", b.dataset.color === c);
     });
+    document.querySelectorAll("#explorerSide .lab-seg").forEach((b) => {
+      b.classList.toggle("active", b.dataset.color === c);
+    });
     loadLabMetrics();
     loadLabSeries();
+    if (state.activeTab === "explorer" && explorerSource() === "mine") renderExplorer();
   }
   const mcls = (s) => (s == null ? "" : s >= 70 ? "ok" : s >= 40 ? "mid" : "bad");
 
@@ -2843,7 +2966,10 @@
     }
   }
   async function perfSyncReviewed(res) {
-    try { await post("/api/perf/import_review", { review: res }); } catch (e) { /* best effort */ }
+    try {
+      await post("/api/perf/import_review", { review: res });
+      myExplorerCache.clear();   // v87: the personal position index changed
+    } catch (e) { /* best effort */ }
   }
 
   /* v66: the Lab always uses every already-reviewed game the browser holds (library is
@@ -2864,6 +2990,7 @@
     try {
       const r = await post("/api/perf/import_pgn", { pgn: text });
       if (r && r.ok) {
+        myExplorerCache.clear();   // v87: new games mean new position stats
         toast(`Imported ${r.inserted} new game(s) · ${r.duplicates} duplicate(s) skipped`, 4500);
         refreshLab();
       } else if (r && r.error) {
@@ -4523,6 +4650,17 @@
   document.querySelectorAll(".review-col > .tabs .tab").forEach((t) => {
     t.onclick = () => switchTab(t.dataset.tab);
   });
+  document.querySelectorAll("#explorerSource .exp-src-btn").forEach((b) => {
+    b.onclick = () => { setExplorerSource(b.dataset.src); renderExplorer(); };
+  });
+  document.querySelectorAll("#explorerSide .lab-seg").forEach((b) => {
+    b.classList.toggle("active", b.dataset.color === getLabColor());
+    b.onclick = () => {
+      setLabColor(b.dataset.color);
+      if (explorerSource() === "mine") renderExplorer();
+    };
+  });
+  setExplorerSource(explorerSource());
   document.querySelectorAll("#modalNew .tabs .tab").forEach((t) => {
     t.onclick = () => {
       document.querySelectorAll("#modalNew .tabs .tab").forEach((x) => {
