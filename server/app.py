@@ -929,6 +929,32 @@ def api_perf_series():
     return jsonify(perfdb.skill_series(color, _uid()))
 
 
+@app.get("/api/perf/position")
+def api_perf_position():
+    """Personal opening explorer: your record + continuations from a position.
+
+    Read-only and built from stored PGNs/reviews only; the index is cached and
+    invalidated by the same writes that clear the rest of the analytics.
+    """
+    from server import perfdb
+    fen = (request.args.get("fen") or "").strip()
+    if not fen or len(fen) > 200:
+        return jsonify({"error": "missing fen"}), 400
+    try:
+        import chess
+        chess.Board(fen)
+    except Exception:
+        return jsonify({"error": "invalid FEN"}), 400
+    color = (request.args.get("color") or "white").strip().lower()
+    if color not in ("white", "black"):
+        color = "white"
+    try:
+        return jsonify(perfdb.position_report(fen, color, _uid()))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.post("/api/perf/games/delete")
 def api_perf_games_delete():
     from server import perfdb
