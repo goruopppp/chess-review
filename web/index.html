@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=86">
+<link rel="stylesheet" href="css/style.css?v=87">
 </head>
 <body>
 <div class="app-shell">
@@ -273,12 +273,20 @@
     </div>
 
     <div class="tab-body" id="tab-explorer" role="tabpanel" hidden>
+      <div class="exp-src" id="explorerSource" role="tablist" aria-label="Explorer source">
+        <button class="exp-src-btn active" data-src="masters" type="button" role="tab" aria-selected="true">Masters</button>
+        <button class="exp-src-btn" data-src="mine" type="button" role="tab" aria-selected="false">My games</button>
+      </div>
       <div class="exp-head">
         <div class="exp-opening" id="explorerOpening">&#8212;</div>
         <div class="exp-meta text-small text-muted" id="explorerMeta"></div>
+        <span class="lab-color-toggle exp-side" id="explorerSide" hidden>
+          <button class="lab-seg active" data-color="white" type="button" aria-label="Your White games">White</button>
+          <button class="lab-seg" data-color="black" type="button" aria-label="Your Black games">Black</button>
+        </span>
       </div>
       <div id="explorerList" class="exp-list"></div>
-      <p class="text-small text-muted">Continuations from the Lichess masters database. Click a move to play it on the board.</p>
+      <p class="text-small text-muted" id="explorerHint">Continuations from the Lichess masters database. Click a move to play it on the board.</p>
     </div>
 
     <div class="tab-body" id="tab-repertoire" role="tabpanel" hidden>
@@ -1034,6 +1042,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=86"></script>
+<script src="js/app.js?v=87"></script>
 </body>
 </html>
