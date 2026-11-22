@@ -553,6 +553,44 @@ html[data-ui-theme="light"] .board { box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
 html[data-ui-theme="light"] .wdl .w { background: #ffffff; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12); }
 .exp-games { text-align: right; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* v87: personal opening explorer */
+.exp-src {
+  display: inline-flex; gap: 2px; padding: 2px; margin-bottom: 8px;
+  background: var(--inset); border-radius: 7px;
+}
+.exp-src-btn {
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  border-radius: 5px; padding: 4px 10px; font-size: 11px; font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.exp-src-btn:hover { color: var(--text); }
+.exp-src-btn.active { background: var(--panel); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.14); }
+.exp-side { margin-top: 6px; }
+.exp-acc {
+  display: inline-block; margin-left: 2px; padding: 0 4px; vertical-align: 1px;
+  border-radius: 4px; background: var(--inset); color: var(--muted);
+  font-size: 10px; font-style: normal; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.exp-pct.good { color: var(--green2); }
+.exp-pct.mid { color: var(--yellow); }
+.exp-pct.low { color: var(--red); }
+.wdl .yw { background: var(--green); opacity: 0.85; }
+.wdl .yl { background: var(--red); opacity: 0.85; }
+.exp-recent { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.exp-recent-title {
+  margin-bottom: 4px; color: var(--muted); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.4px; text-transform: uppercase;
+}
+.exp-recent-row { display: flex; align-items: baseline; gap: 6px; padding: 2px 0; font-size: 11.5px; }
+.exp-recent-res {
+  flex: none; padding: 0 4px; border-radius: 3px; background: var(--inset);
+  color: var(--muted); font-size: 10px; font-weight: 700;
+}
+.exp-recent-res.win { color: var(--green2); }
+.exp-recent-res.loss { color: var(--red); }
+.exp-recent-names { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exp-recent-date { flex: none; color: var(--muted); font-size: 10.5px; }
+
 /* ---------- repertoire ---------- */
 .rep-saved { margin-bottom: 14px; }
 .rep-saved-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
