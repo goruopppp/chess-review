@@ -9,6 +9,7 @@ JSON blobs hold per-game breakdowns (phases, accuracy trend, move quality); ever
 else is indexed columns so filters never scan.
 """
 import hashlib
+import io
 import json
 import re
 import sqlite3
@@ -16,6 +17,9 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+import chess
+import chess.pgn
 
 try:
     from server import db
@@ -37,6 +41,15 @@ _conn = None
 _CACHE_TTL = 10.0
 _cache = {}
 
+# --- personal position index (v87) ---------------------------------------
+# Replaying every stored PGN on each explorer move would be wasteful, so the
+# full position -> results/continuations index is built once per account and
+# kept until a write clears it (cache_clear). Bounded so many accounts cannot
+# grow the process without limit.
+_POS_INDEX = {}
+_POS_LOCK = threading.RLock()
+_POS_MAX = 8
+
 
 def _cache_get(key):
     hit = _cache.get(key)
@@ -57,6 +70,8 @@ def _cache_set(key, value):
 def cache_clear():
     """Called by every mutating path so the analytics never go stale."""
     _cache.clear()
+    with _POS_LOCK:
+        _POS_INDEX.clear()
 
 
 def _cached(fn):
@@ -1305,3 +1320,214 @@ def openings_report(user_id=""):
             "confidence": "high" if f["games"] >= 10 else ("medium" if f["games"] >= 5 else "low"),
         })
     return {"families": out}
+
+
+# ---------------------------------------------------------------- personal position explorer
+
+
+def _position_key(board):
+    """Identity of a position for the personal opening explorer.
+
+    Move counters are irrelevant (transpositions must merge), while a legal
+    en passant target is part of the position. python-chess only reports the
+    ep square when a capture is actually available, so no ghost-ep merges.
+    """
+    fen = board.fen().split()
+    ep = board.ep_square if board.has_legal_en_passant() else None
+    fen[3] = chess.square_name(ep) if ep is not None else "-"
+    return " ".join(fen[:4])
+
+
+def _fen_key(fen):
+    """Normalise a client FEN to the same key the index uses."""
+    try:
+        return _position_key(chess.Board(fen))
+    except Exception:
+        return " ".join((fen or "").split()[:4])
+
+
+def _pgn_result_score(result):
+    r = (result or "").strip()
+    if r == "1-0":
+        return 1.0
+    if r == "0-1":
+        return 0.0
+    if r in ("1/2-1/2", "0.5-0.5"):
+        return 0.5
+    return None
+
+
+def _build_position_index(user_id=""):
+    """Replay every stored PGN once: position -> record, continuations, refs.
+
+    Results and per-move accuracy come from the real games/reviews rows. No
+    engine work and no inferred numbers: a node exists only because a game
+    actually reached it.
+    """
+    with _lock:
+        conn = _connect()
+        rows = conn.execute(
+            "SELECT g.id, g.white, g.black, g.result, g.date, g.date_ts, g.opening,"
+            " g.pgn_text, r.moves_json"
+            " FROM games g LEFT JOIN reviews r"
+            "   ON r.game_id = g.id AND r.user_id = g.user_id"
+            " WHERE g.user_id = ?", (user_id,)).fetchall()
+    positions = {}
+    games = []
+    for gid, white, black, result, date, date_ts, opening, pgn_text, moves_json in rows:
+        if not pgn_text:
+            continue
+        try:
+            game = chess.pgn.read_game(io.StringIO(pgn_text))
+            if game is None:
+                continue
+            board = game.board()
+            mainline = list(game.mainline_moves())
+        except Exception:
+            continue
+        try:
+            detail = json.loads(moves_json) if moves_json else []
+            if not isinstance(detail, list):
+                detail = []
+        except Exception:
+            detail = []
+        score = _pgn_result_score(result)
+        gi = len(games)
+        games.append({"id": gid, "white": white, "black": black,
+                      "result": result, "date": date, "dateTs": date_ts or 0,
+                      "opening": opening or ""})
+        last_key = None
+        for i, move in enumerate(mainline):
+            key = _position_key(board)
+            last_key = key
+            node = positions.get(key)
+            if node is None:
+                node = positions[key] = {"n": 0, "w": 0, "d": 0, "l": 0, "u": 0,
+                                         "moves": {}, "refs": []}
+            node["n"] += 1
+            if score is None:
+                node["u"] += 1
+            elif score == 1.0:
+                node["w"] += 1
+            elif score == 0.5:
+                node["d"] += 1
+            else:
+                node["l"] += 1
+            try:
+                san = board.san(move)
+                uci = move.uci()
+            except Exception:
+                break
+            mv = node["moves"].get(san)
+            if mv is None:
+                mv = node["moves"][san] = {"san": san, "uci": uci, "n": 0,
+                                           "w": 0, "d": 0, "l": 0, "u": 0,
+                                           "accSum": 0.0, "accN": 0}
+            mv["n"] += 1
+            if score is None:
+                mv["u"] += 1
+            elif score == 1.0:
+                mv["w"] += 1
+            elif score == 0.5:
+                mv["d"] += 1
+            else:
+                mv["l"] += 1
+            info = detail[i] if i < len(detail) and isinstance(detail[i], dict) else None
+            if info:
+                acc = info.get("accuracy")
+                if isinstance(acc, (int, float)):
+                    mv["accSum"] += float(acc)
+                    mv["accN"] += 1
+            node["refs"].append((gi, i))
+            try:
+                board.push(move)
+            except Exception:
+                break
+        # The position after the last move is a real node too (typically an
+        # endgame). Its continuation list is empty, but its record is not.
+        final_key = _position_key(board)
+        if final_key != last_key:
+            node = positions.get(final_key)
+            if node is None:
+                node = positions[final_key] = {"n": 0, "w": 0, "d": 0, "l": 0, "u": 0,
+                                               "moves": {}, "refs": []}
+            node["n"] += 1
+            if score is None:
+                node["u"] += 1
+            elif score == 1.0:
+                node["w"] += 1
+            elif score == 0.5:
+                node["d"] += 1
+            else:
+                node["l"] += 1
+            node["refs"].append((gi, len(mainline)))
+    return {"positions": positions, "games": games, "total": len(games)}
+
+
+def _position_index(user_id=""):
+    key = user_id or ""
+    with _POS_LOCK:
+        hit = _POS_INDEX.pop(key, None)
+        if hit is not None:
+            _POS_INDEX[key] = hit       # refresh LRU order
+            return hit
+    idx = _build_position_index(key)
+    with _POS_LOCK:
+        _POS_INDEX[key] = idx
+        while len(_POS_INDEX) > _POS_MAX:
+            _POS_INDEX.pop(next(iter(_POS_INDEX)))
+    return idx
+
+
+def position_report(fen, color="white", user_id=""):
+    """Your results and continuations from one position (personal explorer)."""
+    me = "black" if (color or "").strip().lower() == "black" else "white"
+    idx = _position_index(user_id or "")
+    try:
+        turn = "white" if chess.Board(fen).turn else "black"
+    except Exception:
+        turn = "white"
+    node = idx["positions"].get(_fen_key(fen))
+    base = {"positionGames": 0, "totalGames": idx["total"], "me": me,
+            "turn": turn, "score": None, "wins": 0, "draws": 0, "losses": 0,
+            "unscored": 0, "moves": [], "recent": []}
+    if not node:
+        return base
+
+    def mine(wins, losses):
+        return (wins, losses) if me == "white" else (losses, wins)
+
+    wins, losses = mine(node["w"], node["l"])
+    draws = node["d"]
+    decided = wins + draws + losses
+    out = dict(base)
+    out.update({
+        "positionGames": node["n"],
+        "score": round((wins + 0.5 * draws) / decided * 100, 1) if decided else None,
+        "wins": wins, "draws": draws, "losses": losses, "unscored": node["u"],
+    })
+    rows = []
+    for mv in node["moves"].values():
+        w, l = mine(mv["w"], mv["l"])
+        dec = w + mv["d"] + l
+        rows.append({
+            "san": mv["san"], "uci": mv["uci"], "games": mv["n"],
+            "share": round(100 * mv["n"] / node["n"], 1) if node["n"] else 0,
+            "wins": w, "draws": mv["d"], "losses": l, "unscored": mv["u"],
+            "score": round((w + 0.5 * mv["d"]) / dec * 100, 1) if dec else None,
+            "accuracy": (round(mv["accSum"] / mv["accN"], 1)
+                         if (turn == me and mv["accN"]) else None),
+        })
+    rows.sort(key=lambda r: (-r["games"], r["san"]))
+    out["moves"] = rows[:12]
+    refs = {}
+    for gi, ply in node["refs"]:
+        refs.setdefault(gi, ply)
+    recent = []
+    for gi, ply in sorted(refs.items(),
+                          key=lambda kv: -(idx["games"][kv[0]]["dateTs"] or 0))[:5]:
+        g = dict(idx["games"][gi])
+        g["ply"] = ply
+        recent.append(g)
+    out["recent"] = recent
+    return out
