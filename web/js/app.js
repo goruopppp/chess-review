@@ -3064,6 +3064,267 @@
     }
   });
 
+  /* ═══════════════ v89 Rivals: opponent scouting from real stored games ═══════════════ */
+  const RIVAL_ME_KEY = "crs_rival_me";
+  let rivalsOpen = false;
+  let rivalsData = null;
+  let rivalsReq = 0;
+  let rivalsSort = "games";
+  const rivalsExpanded = new Set();
+
+  function rivalNum(v, digits, suffix) {
+    return (typeof v === "number" && isFinite(v)) ? v.toFixed(digits) + (suffix || "") : "—";
+  }
+  function rivalScoreCls(s) {
+    if (typeof s !== "number") return "none";
+    return s >= 55 ? "good" : (s <= 45 ? "bad" : "even");
+  }
+  function rivalScoreTxt(s) {
+    return typeof s === "number" ? Math.round(s) + "%" : "—";
+  }
+  function rivalTag(r) {
+    if (r.games < 2 || typeof r.score !== "number") return `<span class="rv-badge new">New</span>`;
+    if (r.score <= 45) return `<span class="rv-badge tough">Tough</span>`;
+    if (r.score >= 55) return `<span class="rv-badge fav">Favourable</span>`;
+    return `<span class="rv-badge even">Even</span>`;
+  }
+  function rivalOutcome(result, color) {
+    if (result === "1-0" || result === "0-1") {
+      const whiteWon = result === "1-0";
+      const iWon = (color === "white") === whiteWon;
+      return iWon ? { cls: "win", label: "W" } : { cls: "loss", label: "L" };
+    }
+    if (result === "1/2-1/2" || result === "0.5-0.5") return { cls: "draw", label: "D" };
+    return { cls: "draw", label: "?" };
+  }
+  function rivalSavedMe() {
+    try { return localStorage.getItem(RIVAL_ME_KEY) || ""; } catch (e) { return ""; }
+  }
+
+  function paintRivalSummary() {
+    const d = rivalsData || {};
+    const rv = d.rivals || [];
+    const scored = rv.filter((r) => r.games >= 2 && typeof r.score === "number");
+    const best = scored.slice().sort((a, b) => (b.score - a.score) || (b.games - a.games))[0];
+    const tough = scored.slice().sort((a, b) => (a.score - b.score) || (b.games - a.games))[0];
+    const tile = (k, v, sub, cls) =>
+      `<div class="rv-tile"><span class="rv-tile-k">${k}</span>` +
+      `<b class="${cls || ""}">${v}</b><span class="rv-tile-sub">${sub || ""}</span></div>`;
+    $("rivalsSummary").innerHTML = [
+      tile("Rivals", rv.length, rv.length === 1 ? "player faced" : "players faced"),
+      tile("Games scouted", d.matchedGames || 0,
+           (d.skipped ? `${d.skipped} skipped` : "head-to-head records")),
+      tile("Best record", best ? rivalScoreTxt(best.score) : "—",
+           best ? `vs ${esc(best.name)} (${best.games})` : "needs 2+ games",
+           best ? rivalScoreCls(best.score) : ""),
+      tile("Toughest", tough ? rivalScoreTxt(tough.score) : "—",
+           tough ? `vs ${esc(tough.name)} (${tough.games})` : "needs 2+ games",
+           tough ? rivalScoreCls(tough.score) : ""),
+    ].join("");
+  }
+
+  function rivalDetail(r) {
+    const opp = r.opp || {};
+    const my = r.my || {};
+    const stat = (k, v) => `<div class="rv-stat"><span>${k}</span><b>${v}</b></div>`;
+    const stats = `<div class="rv-stats">
+      ${stat("Their accuracy", rivalNum(opp.accuracy, 1, "%"))}
+      ${stat("Their ACPL", rivalNum(opp.acpl, 1))}
+      ${stat("Error rate", rivalNum(opp.errorRate, 1, "%"))}
+      ${stat("Reviewed", `${opp.reviewed || 0} of ${r.games}`)}
+    </div>`;
+
+    const split = ["white", "black"].map((c) => {
+      const b = (r.colors || {})[c] || { games: 0 };
+      return `<span class="rv-pill">As ${c === "white" ? "White" : "Black"} ` +
+             `<b>${b.games} game${b.games === 1 ? "" : "s"} · ${rivalScoreTxt(b.score)}</b></span>`;
+    }).join("");
+    const splits = `<div><div class="rv-sec">Your record by colour</div>` +
+      `<div class="rv-split">${split}` +
+      `<span class="rv-pill">Your accuracy <b>${rivalNum(my.accuracy, 1, "%")}</b></span></div></div>`;
+
+    const phase = (r.plan && r.plan.weakPhase) || null;
+    const phaseRows = ["opening", "middlegame", "endgame"].map((ph) => {
+      const a = (opp.phase || {})[ph];
+      const w = typeof a === "number" ? Math.max(0, Math.min(100, a)) : 0;
+      const label = ph === "middlegame" ? "Middlegame" : (ph === "opening" ? "Opening" : "Endgame");
+      const cls = ph === phase ? " style=\"background:linear-gradient(90deg,#e2762d,#f0a35e)\"" : "";
+      return `<div class="rv-phase-row"><span>${label}</span>` +
+        `<span class="rv-phase-bar"><span class="rv-phase-fill" style="width:${w}%"${cls}></span></span>` +
+        `<span class="rv-phase-val">${rivalNum(a, 0, "%")}</span></div>`;
+    }).join("");
+    const phaseBlock = `<div><div class="rv-sec">Their accuracy by phase</div>` +
+      `<div class="rv-phase">${phaseRows}</div></div>`;
+
+    const openings = (r.openings || []).slice(0, 8).map((o) =>
+      `<div class="rv-open-row">
+        <span class="rv-open-name" title="${escAttr(o.name)}">${esc(o.name || "Unknown")}${o.eco ? `<small>${esc(o.eco)}</small>` : ""}</span>
+        <span class="rv-open-side">${o.theirColor === "white" ? "White" : "Black"}</span>
+        <span class="rv-open-g">${o.games}</span>
+        <span class="rv-open-score ${rivalScoreCls(o.score)}">${rivalScoreTxt(o.score)}</span>
+      </div>`).join("");
+    const openingsBlock = openings ? `<div><div class="rv-sec">Openings you meet</div>` +
+      `<div class="rv-open"><div class="rv-open-head"><span>Opening</span><span>Their side</span>` +
+      `<span style="text-align:right">G</span><span style="text-align:right">Score</span></div>` +
+      `${openings}</div></div>` : "";
+
+    const notes = ((r.plan && r.plan.notes) || []).map((n) => {
+      const kind = ["weapon", "avoid"].includes(n.kind) ? n.kind : "info";
+      return `<div class="rv-note ${kind}">${esc(n.text)}</div>`;
+    }).join("");
+    const planBlock = notes ? `<div><div class="rv-sec">Match plan</div>` +
+      `<div class="rv-plan">${notes}</div></div>` : "";
+
+    const recent = (r.recent || []).map((g) => {
+      const out = rivalOutcome(g.result, g.myColor);
+      const acc = (typeof g.myAcc === "number" || typeof g.oppAcc === "number")
+        ? `you <b>${rivalNum(g.myAcc, 1, "%")}</b> · them <b>${rivalNum(g.oppAcc, 1, "%")}</b>`
+        : "not reviewed";
+      return `<div class="rv-recent-row">
+        <span class="lab-game-res ${out.cls}">${out.label}</span>
+        <span class="rv-recent-main">
+          <span class="rv-recent-open">${esc(g.opening || "Unknown opening")}</span>
+          <span class="rv-recent-meta">${esc(g.date || "?")} · as ${g.myColor === "white" ? "White" : "Black"}${g.eco ? ` · ${esc(g.eco)}` : ""}</span>
+        </span>
+        <span class="rv-recent-acc">${acc}</span>
+      </div>`;
+    }).join("");
+    const recentBlock = recent ? `<div><div class="rv-sec">Recent games</div>` +
+      `<div class="rv-recent">${recent}</div></div>` : "";
+
+    return `<div class="rv-detail">${stats}${splits}${phaseBlock}${openingsBlock}${planBlock}${recentBlock}</div>`;
+  }
+
+  function rivalsSorted() {
+    const arr = ((rivalsData && rivalsData.rivals) || []).slice();
+    const score = (r) => (typeof r.score === "number" ? r.score : 101);
+    if (rivalsSort === "tough") {
+      arr.sort((a, b) => ((a.games >= 2 ? 0 : 1) - (b.games >= 2 ? 0 : 1)) ||
+                         score(a) - score(b) || b.games - a.games);
+    } else if (rivalsSort === "recent") {
+      arr.sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0) || b.games - a.games);
+    } else {
+      arr.sort((a, b) => b.games - a.games || score(a) - score(b));
+    }
+    return arr;
+  }
+
+  function paintRivals() {
+    paintRivalSummary();
+    const el = $("rivalsList");
+    const d = rivalsData || {};
+    if (!d.totalGames) {
+      el.innerHTML = `<div class="lab-empty">No stored games yet. Import PGNs in the Lab and every opponent gets a scouting report here.</div>`;
+      return;
+    }
+    const arr = rivalsSorted();
+    if (!arr.length) {
+      el.innerHTML = `<div class="lab-empty">No head-to-head opponents found for ${esc(d.me || "this name")}.</div>`;
+      return;
+    }
+    el.innerHTML = arr.map((r) => {
+      const key = (r.name || "").toLowerCase();
+      const open = rivalsExpanded.has(key);
+      const sub = [r.oppElo ? `~${r.oppElo} Elo` : "",
+                   r.lastDate ? `last ${r.lastDate}` : ""].filter(Boolean).join(" · ");
+      return `<div class="rv-item${open ? " open" : ""}" data-k="${escAttr(key)}">
+        <button class="rv-head" type="button" aria-expanded="${open}">
+          <span class="rv-who">
+            <span class="rv-name">${esc(r.name)}</span>
+            <span class="rv-sub">${esc(sub)}</span>
+          </span>
+          <span class="rv-record">
+            ${rivalTag(r)}
+            <span class="rv-score ${rivalScoreCls(r.score)}">${rivalScoreTxt(r.score)}</span>
+            <span class="rv-wdl" title="Your results against them">${r.wins}W ${r.draws}D ${r.losses}L</span>
+          </span>
+          <span class="rv-chev" aria-hidden="true">&#9662;</span>
+        </button>
+        ${open ? rivalDetail(r) : ""}
+      </div>`;
+    }).join("");
+    el.querySelectorAll(".rv-item").forEach((item) => {
+      const head = item.querySelector(".rv-head");
+      if (!head) return;
+      head.onclick = () => {
+        const k = item.dataset.k || "";
+        if (rivalsExpanded.has(k)) rivalsExpanded.delete(k);
+        else rivalsExpanded.add(k);
+        paintRivals();
+      };
+    });
+  }
+
+  async function loadRivals(force) {
+    const req = ++rivalsReq;
+    if (force) rivalsData = null;
+    $("rivalsSummary").innerHTML = "";
+    $("rivalsList").innerHTML = `<div class="lab-empty">Building scouting reports from your stored games…</div>`;
+    const saved = rivalSavedMe();
+    const account = (accUser() && accUser().username) || "";
+    const want = saved || account;
+    try {
+      const d = await api("/api/perf/rivals" + (want ? "?me=" + encodeURIComponent(want) : ""));
+      if (req !== rivalsReq) return;   // a newer load owns the page
+      rivalsData = d;
+      const cands = d.candidates || [];
+      const sel = $("rivalsMe");
+      sel.innerHTML = cands.length
+        ? cands.map((c) => `<option value="${escAttr(c.name)}">${esc(c.name)} (${c.games})</option>`).join("")
+        : `<option value="">No games imported</option>`;
+      sel.disabled = !cands.length;
+      if (d.me) sel.value = d.me;
+      if (saved && d.detected) {
+        try { localStorage.removeItem(RIVAL_ME_KEY); } catch (e) { /* private mode */ }
+      }
+      $("rivalsMeMeta").textContent = d.totalGames
+        ? `${d.matchedGames} of ${d.totalGames} games scouted` : "no games yet";
+      $("rivalsMeHint").textContent = !d.totalGames
+        ? "Import games in the Lab to start building opponent reports."
+        : (d.detected
+          ? "Auto-detected from your most frequent name — change it if this is not you."
+          : "Using your saved player name. Pick another below if needed.");
+      paintRivals();
+    } catch (e) {
+      if (req !== rivalsReq) return;
+      $("rivalsMeMeta").textContent = "unavailable";
+      $("rivalsMeHint").textContent = "";
+      $("rivalsList").innerHTML = `<div class="lab-empty">Rivals unavailable — ${esc(e.message || "server error")}.</div>`;
+    }
+  }
+
+  function showRivals(open) {
+    rivalsOpen = !!open;
+    $("viewRivals").hidden = !rivalsOpen;
+    const ma = document.querySelector(".main-area");
+    if (ma) ma.classList.toggle("rivals-open", rivalsOpen);
+    $("btnRivalsNav").classList.toggle("active", rivalsOpen);
+    if (rivalsOpen) {
+      if (labOpen) showLab(false);          // pages are mutually exclusive
+      if (ovOpenState) applyOverview(false);
+      $("viewRivals").scrollTop = 0;
+      loadRivals();
+    }
+    syncNav();
+  }
+  $("btnRivalsNav").onclick = () => { navFocus = "rivals"; showRivals(!rivalsOpen); };
+  $("rivalsBackBtn").onclick = () => { navFocus = "review"; showRivals(false); };
+  $("rivalsRefreshBtn").onclick = () => { rivalsExpanded.clear(); loadRivals(true); };
+  $("rivalsMe").onchange = () => {
+    try { localStorage.setItem(RIVAL_ME_KEY, $("rivalsMe").value); } catch (e) { /* private mode */ }
+    rivalsExpanded.clear();
+    loadRivals();
+  };
+  document.querySelectorAll("#rivalsSorts .lab-seg").forEach((b) => {
+    b.onclick = () => {
+      rivalsSort = b.dataset.sort || "games";
+      document.querySelectorAll("#rivalsSorts .lab-seg").forEach((x) => {
+        x.classList.toggle("active", x === b);
+      });
+      if (rivalsData) paintRivals();
+    };
+  });
+
   /* Lab is a full sidebar page (v66): btnLab opens it; Board button / Esc / btnLab closes it */
   let labOpen = false;
   function showLab(open) {
@@ -3076,6 +3337,7 @@
       ? "Back to the board"
       : "Performance Lab - performance analytics across all your games";
     if (labOpen) {
+      if (rivalsOpen) showRivals(false);   // v89: pages are mutually exclusive
       $("viewLab").scrollTop = 0;
       refreshLab();
     }
@@ -3086,8 +3348,9 @@
   $("labBackBtn").onclick = () => { navFocus = "review"; showLab(false); };
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !document.querySelector(".modal-backdrop:not([hidden])")) {
-      if (labOpen || ovOpenState) navFocus = "review";
-      if (labOpen) showLab(false);
+      if (labOpen || ovOpenState || rivalsOpen) navFocus = "review";
+      if (rivalsOpen) showRivals(false);
+      else if (labOpen) showLab(false);
       else if (ovOpenState) applyOverview(false);
     }
   });
@@ -3101,6 +3364,7 @@
     if (ma) ma.classList.toggle("overview-open", ovOpenState);
     $("btnOverview").classList.toggle("active", ovOpenState);
     if (ovOpenState && labOpen) showLab(false);   // exclusive pages
+    if (ovOpenState && rivalsOpen) showRivals(false);
     if (ovOpenState) {
       $("viewOverview").scrollTop = 0;
       refreshOverview();
@@ -3124,12 +3388,15 @@
     const onOverview = ovOpenState && apiDist && !apiDist.hidden;
     const labEl = document.getElementById("viewLab");
     const onLab = labOpen && labEl && !labEl.hidden;
-    const els = { overview: $("btnOverview"), lab: $("btnLabNav"), openings: $("btnOpeningsNav"), train: $("btnTrainNav"), review: $("btnReviewNav") };
+    const rivalsEl = document.getElementById("viewRivals");
+    const onRivals = rivalsOpen && rivalsEl && !rivalsEl.hidden;
+    const els = { overview: $("btnOverview"), rivals: $("btnRivalsNav"), lab: $("btnLabNav"), openings: $("btnOpeningsNav"), train: $("btnTrainNav"), review: $("btnReviewNav") };
     Object.values(els).forEach((b) => b && b.classList.remove("active"));
     const k = onOverview ? "overview"
-      : onLab ? (navFocus === "openings" ? "openings" : "lab")
-        : (navFocus === "train" && state.activeTab === "trainer") ? "train"
-          : "review";
+      : onRivals ? "rivals"
+        : onLab ? (navFocus === "openings" ? "openings" : "lab")
+          : (navFocus === "train" && state.activeTab === "trainer") ? "train"
+            : "review";
     if (els[k]) els[k].classList.add("active");
   }
 
@@ -3314,8 +3581,8 @@
   /* ---- v71/v74 sidebar destinations: every link opens an existing surface ---- */
   $("btnOverview").onclick = () => { navFocus = "overview"; applyOverview(!ovOpenState); };
   $("ovBackBtn").onclick = () => { navFocus = "review"; applyOverview(false); };
-  $("btnReviewNav").onclick = () => { navFocus = "review"; applyOverview(false); showLab(false); };
-  $("btnHistoryNav").onclick = () => { navFocus = "review"; applyOverview(false); renderLibrary(); $("modalLibrary").hidden = false; };
+  $("btnReviewNav").onclick = () => { navFocus = "review"; applyOverview(false); showLab(false); showRivals(false); };
+  $("btnHistoryNav").onclick = () => { navFocus = "review"; applyOverview(false); showRivals(false); renderLibrary(); $("modalLibrary").hidden = false; };
   $("btnLabNav").onclick = () => { navFocus = "lab"; applyOverview(false); showLab(true); };
   $("btnOpeningsNav").onclick = () => {
     navFocus = "openings";
@@ -3335,6 +3602,7 @@
     navFocus = "train";
     applyOverview(false);
     showLab(false);
+    showRivals(false);
     switchTab("trainer");   // the SM-2 mistake-trainer dashboard is the training surface
     const land = () => scrollToEl($("tab-trainer"));
     setTimeout(land, 60);     // first landing (dashboard may paint after)
