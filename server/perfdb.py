@@ -1531,3 +1531,337 @@ def position_report(fen, color="white", user_id=""):
         recent.append(g)
     out["recent"] = recent
     return out
+
+
+# ---------------------------------------------------------------- opponent scouting (v89)
+
+
+def _person_key(name):
+    """Case/spacing-insensitive identity for a player name."""
+    return " ".join((name or "").split()).strip().casefold()
+
+
+def _wdl_bucket():
+    return {"games": 0, "wins": 0, "draws": 0, "losses": 0,
+            "unscored": 0, "score": None}
+
+
+def _wdl_add(bucket, score):
+    bucket["games"] += 1
+    if score is None:
+        bucket["unscored"] += 1
+    elif score == 1.0:
+        bucket["wins"] += 1
+    elif score == 0.5:
+        bucket["draws"] += 1
+    else:
+        bucket["losses"] += 1
+
+
+def _wdl_done(bucket):
+    decided = bucket["wins"] + bucket["draws"] + bucket["losses"]
+    bucket["score"] = (round(100.0 * (bucket["wins"] + 0.5 * bucket["draws"]) / decided, 1)
+                       if decided else None)
+    return bucket
+
+
+def _score_for(result, color):
+    s = _pgn_result_score(result)
+    if s is None:
+        return None
+    return s if color == "white" else 1.0 - s
+
+
+def _plan_ref(op):
+    if not op:
+        return None
+    return {"name": op["name"], "eco": op["eco"], "games": op["games"],
+            "score": op["score"], "theirColor": op["theirColor"]}
+
+
+def _scout_plan(rec):
+    """Deterministic match plan from repeated, real results only."""
+    repeated = [o for o in rec["openings"]
+                if o["games"] >= 2 and o["score"] is not None]
+    weapon = avoid = None
+    if repeated:
+        best = sorted(repeated, key=lambda o: (-o["score"], -o["games"],
+                                               o["name"].casefold()))[0]
+        if best["score"] >= 60:
+            weapon = best
+        worst = sorted(repeated, key=lambda o: (o["score"], -o["games"],
+                                               o["name"].casefold()))[0]
+        if worst["score"] <= 40:
+            avoid = worst
+    favorite = None
+    if rec["openings"]:
+        favorite = sorted(rec["openings"],
+                          key=lambda o: (-o["games"], o["name"].casefold()))[0]
+    phases = [(ph, acc) for ph, acc in rec["opp"]["phase"].items()
+              if acc is not None]
+    weak = min(phases, key=lambda kv: kv[1]) if (phases and rec["opp"]["reviewed"] >= 2) else None
+    colors = [(c, b) for c, b in rec["colors"].items()
+              if b["games"] >= 2 and b["score"] is not None]
+    best_color = max(colors, key=lambda kv: (kv[1]["score"], kv[1]["games"]))[0] if colors else None
+
+    notes = []
+    if weapon:
+        notes.append({"kind": "weapon",
+                      "text": f"Steer into {weapon['name']} - you score "
+                              f"{weapon['score']:.0f}% in {weapon['games']} games."})
+    if avoid:
+        notes.append({"kind": "avoid",
+                      "text": f"Avoid {avoid['name']} - only "
+                              f"{avoid['score']:.0f}% in {avoid['games']} games."})
+    if favorite:
+        notes.append({"kind": "info",
+                      "text": f"Most-faced opening: {favorite['name']} "
+                              f"({favorite['games']} game{'s' if favorite['games'] != 1 else ''})."})
+    if weak:
+        if weak[1] <= 80:
+            notes.append({"kind": "info",
+                          "text": f"Attack their {weak[0]} - they average "
+                                  f"{weak[1]:.0f}% accuracy there."})
+        else:
+            notes.append({"kind": "info",
+                          "text": f"Lowest phase: {weak[0]} at {weak[1]:.0f}% accuracy."})
+    if not rec["opp"]["reviewed"]:
+        notes.append({"kind": "info",
+                      "text": "Review these games to unlock their accuracy and phase tendencies."})
+    if not notes:
+        notes.append({"kind": "info",
+                      "text": "Play them again to unlock a match plan."})
+    return {
+        "weapon": _plan_ref(weapon),
+        "avoid": _plan_ref(avoid),
+        "favorite": _plan_ref(favorite),
+        "weakPhase": weak[0] if weak else None,
+        "weakPhaseAcc": weak[1] if weak else None,
+        "bestColor": best_color,
+        "notes": notes[:4],
+    }
+
+
+@_cached
+def rivals(user_id="", me=None):
+    """Opponent scouting from stored games, auto-detecting which name is you.
+
+    `me` is an optional explicit name; when it does not match a stored player
+    the most frequent name wins and `detected` stays true so the UI can ask.
+    W/D/L and score are always from the scouted player's side, never the
+    opponent's. All numbers come from stored results and reviews only.
+    """
+    with _lock:
+        conn = _connect()
+        rows = conn.execute(
+            "SELECT g.id, g.white, g.black, g.white_elo, g.black_elo, g.result,"
+            " g.date, g.date_ts, g.tc_bucket, g.opening, g.eco, g.ply_count,"
+            " r.white_acc, r.black_acc, r.white_acpl, r.black_acpl,"
+            " r.phase_json, r.moves_json"
+            " FROM games g LEFT JOIN reviews r"
+            "   ON r.game_id = g.id AND r.user_id = g.user_id"
+            " WHERE g.user_id = ? ORDER BY g.date_ts DESC, g.id DESC",
+            (user_id,)).fetchall()
+
+    counts, display = {}, {}
+    for row in rows:
+        for name in (row[1], row[2]):
+            key = _person_key(name)
+            if not key:
+                continue
+            counts[key] = counts.get(key, 0) + 1
+            display.setdefault(key, " ".join((name or "").split()))
+    ranked = sorted(counts, key=lambda k: (-counts[k], display[k].casefold()))
+    candidates = [{"name": display[k], "games": counts[k]} for k in ranked[:50]]
+
+    me_name, detected = "", True
+    if me:
+        key = _person_key(_canonical_player(me.strip(), user_id))
+        if key in counts:
+            me_name, detected = display[key], False
+    if not me_name and ranked:
+        me_name = display[ranked[0]]
+
+    if not me_name:
+        return {"me": "", "detected": True, "candidates": [],
+                "totalGames": len(rows), "matchedGames": 0,
+                "skipped": len(rows), "rivals": []}
+
+    me_key = _person_key(me_name)
+    table = {}
+    matched = skipped = 0
+    for row in rows:
+        (gid, white, black, welo, belo, result, date, date_ts, tc,
+         opening, eco, plies, wacc, bacc, wacpl, bacpl,
+         phase_json, moves_json) = row
+        my_white = _person_key(white) == me_key
+        my_black = _person_key(black) == me_key
+        if my_white == my_black:
+            skipped += 1
+            continue
+        my_color = "white" if my_white else "black"
+        opp_color = "black" if my_color == "white" else "white"
+        opp_name = black if my_color == "white" else white
+        okey = _person_key(opp_name)
+        if not okey:
+            skipped += 1
+            continue
+        matched += 1
+        rec = table.get(okey)
+        if rec is None:
+            rec = table[okey] = {
+                "name": " ".join((opp_name or "").split()),
+                **_wdl_bucket(),
+                "colors": {"white": _wdl_bucket(), "black": _wdl_bucket()},
+                "openings": {},
+                "opp": {"reviewed": 0, "accSum": 0.0, "accN": 0,
+                        "acplSum": 0.0, "acplN": 0, "moves": 0,
+                        "blunders": 0, "mistakes": 0, "inaccuracies": 0,
+                        "misses": 0,
+                        "phase": {ph: {"sum": 0.0, "n": 0}
+                                  for ph in ("opening", "middlegame", "endgame")}},
+                "my": {"reviewed": 0, "accSum": 0.0, "accN": 0,
+                       "acplSum": 0.0, "acplN": 0},
+                "recent": [], "lastTs": -1, "lastDate": "",
+                "firstTs": None, "firstDate": "", "eloSum": 0.0, "eloN": 0,
+            }
+
+        score = _score_for(result, my_color)
+        _wdl_add(rec, score)
+        _wdl_add(rec["colors"][my_color], score)
+
+        opkey = (opening or "Unknown", eco or "", opp_color)
+        op = rec["openings"].get(opkey)
+        if op is None:
+            op = rec["openings"][opkey] = {
+                "name": opening or "Unknown", "eco": eco or "",
+                "theirColor": opp_color, **_wdl_bucket(),
+            }
+        _wdl_add(op, score)
+
+        my_acc = opp_acc = my_acpl = opp_acpl = None
+        if moves_json or phase_json:
+            rec["opp"]["reviewed"] += 1
+            rec["my"]["reviewed"] += 1
+            opp_acc = bacc if opp_color == "black" else wacc
+            opp_acpl = bacpl if opp_color == "black" else wacpl
+            my_acc = wacc if my_color == "white" else bacc
+            my_acpl = wacpl if my_color == "white" else bacpl
+            for bucket, acc, acpl in ((rec["opp"], opp_acc, opp_acpl),
+                                       (rec["my"], my_acc, my_acpl)):
+                if isinstance(acc, (int, float)):
+                    bucket["accSum"] += float(acc)
+                    bucket["accN"] += 1
+                if isinstance(acpl, (int, float)):
+                    bucket["acplSum"] += float(acpl)
+                    bucket["acplN"] += 1
+            try:
+                mvs = json.loads(moves_json or "[]")
+            except Exception:
+                mvs = []
+            if isinstance(mvs, list):
+                for m in mvs:
+                    if not isinstance(m, dict) or m.get("color") != opp_color:
+                        continue
+                    if m.get("class") == "book":
+                        continue
+                    rec["opp"]["moves"] += 1
+                    cls = m.get("class")
+                    if cls == "blunder":
+                        rec["opp"]["blunders"] += 1
+                    elif cls == "mistake":
+                        rec["opp"]["mistakes"] += 1
+                    elif cls == "inaccuracy":
+                        rec["opp"]["inaccuracies"] += 1
+                    elif cls == "miss":
+                        rec["opp"]["misses"] += 1
+            try:
+                phases = json.loads(phase_json or "{}")
+            except Exception:
+                phases = {}
+            side = phases.get(opp_color) if isinstance(phases, dict) else None
+            if isinstance(side, dict):
+                for ph in ("opening", "middlegame", "endgame"):
+                    cell = side.get(ph)
+                    acc = cell.get("accuracy") if isinstance(cell, dict) else None
+                    if isinstance(acc, (int, float)):
+                        rec["opp"]["phase"][ph]["sum"] += float(acc)
+                        rec["opp"]["phase"][ph]["n"] += 1
+
+        ts = int(date_ts or 0)
+        if ts >= rec["lastTs"]:
+            rec["lastTs"], rec["lastDate"] = ts, date or ""
+        if rec["firstTs"] is None or ts < rec["firstTs"]:
+            rec["firstTs"], rec["firstDate"] = ts, date or ""
+        opp_elo = belo if my_color == "white" else welo
+        if isinstance(opp_elo, int) and opp_elo > 0:
+            rec["eloSum"] += opp_elo
+            rec["eloN"] += 1
+        rec["recent"].append({
+            "id": gid, "date": date or "", "dateTs": ts, "result": result or "*",
+            "myColor": my_color, "opening": opening or "", "eco": eco or "",
+            "plyCount": plies or 0,
+            "myAcc": round(my_acc, 1) if isinstance(my_acc, (int, float)) else None,
+            "oppAcc": round(opp_acc, 1) if isinstance(opp_acc, (int, float)) else None,
+        })
+
+    out = []
+    for rec in table.values():
+        _wdl_done(rec)
+        for b in rec["colors"].values():
+            _wdl_done(b)
+        openings = []
+        for op in rec["openings"].values():
+            _wdl_done(op)
+            openings.append(op)
+        openings.sort(key=lambda o: (-o["games"], o["name"].casefold()))
+        rec["openings"] = openings[:12]
+        rec["recent"] = sorted(rec["recent"],
+                               key=lambda g: (-(g["dateTs"] or 0), g["id"]))[:5]
+        opp = rec["opp"]
+        rec["opp"] = {
+            "reviewed": opp["reviewed"],
+            "accuracy": round(opp["accSum"] / opp["accN"], 1) if opp["accN"] else None,
+            "acpl": round(opp["acplSum"] / opp["acplN"], 1) if opp["acplN"] else None,
+            "moves": opp["moves"],
+            "blunders": opp["blunders"], "mistakes": opp["mistakes"],
+            "inaccuracies": opp["inaccuracies"], "misses": opp["misses"],
+            "errorRate": (round(100.0 * (opp["blunders"] + opp["mistakes"]
+                                        + opp["inaccuracies"] + opp["misses"])
+                               / opp["moves"], 1) if opp["moves"] else None),
+            "phase": {ph: (round(v["sum"] / v["n"], 1) if v["n"] else None)
+                      for ph, v in opp["phase"].items()},
+        }
+        my = rec["my"]
+        rec["my"] = {
+            "reviewed": my["reviewed"],
+            "accuracy": round(my["accSum"] / my["accN"], 1) if my["accN"] else None,
+            "acpl": round(my["acplSum"] / my["acplN"], 1) if my["acplN"] else None,
+        }
+        rec["oppElo"] = (round(rec["eloSum"] / rec["eloN"])
+                         if rec["eloN"] else None)
+        rec["confidence"] = ("low" if rec["games"] < 4
+                             else ("medium" if rec["games"] < 10 else "high"))
+        rec["plan"] = _scout_plan(rec)
+        rec.pop("eloSum", None)
+        rec.pop("eloN", None)
+        out.append(rec)
+
+    out.sort(key=lambda r: (-r["games"],
+                            (r["score"] if r["score"] is not None else 101),
+                            r["name"].casefold()))
+    return {"me": me_name, "detected": detected, "candidates": candidates,
+            "totalGames": len(rows), "matchedGames": matched,
+            "skipped": skipped, "rivals": out}
+
+
+def rival_report(name, user_id="", me=None):
+    """One rival from the cached scouting table (None when not found)."""
+    data = rivals(user_id, me=me)
+    key = _person_key(name)
+    found = next((r for r in data["rivals"]
+                  if _person_key(r["name"]) == key), None)
+    out = {k: data[k] for k in ("me", "detected", "candidates",
+                                "totalGames", "matchedGames", "skipped")}
+    out["rival"] = found
+    return out
