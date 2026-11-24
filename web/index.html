@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=88">
+<link rel="stylesheet" href="css/style.css?v=89">
 </head>
 <body>
 <div class="app-shell">
@@ -36,6 +36,10 @@
       <button id="btnWeakNav" class="side-nav-btn" type="button">
         <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3.5M12 18.5V22M2 12h3.5M18.5 12H22"/></g></svg>
         <span class="lbl">Weaknesses</span>
+      </button>
+      <button id="btnRivalsNav" class="side-nav-btn" type="button">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8.5" cy="8" r="3"/><path d="M3 19c0-3 2.4-5 5.5-5s5.5 2 5.5 5"/><path d="M15.5 5.4a3 3 0 0 1 0 5.2M17 14.4c2.4.7 4 2.6 4 4.6"/></g></svg>
+        <span class="lbl">Rivals</span>
       </button>
       <button id="btnOpeningsNav" class="side-nav-btn" type="button">
         <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.5 5 8.5 4 4.5 4v14c4 0 6 1 7.5 2.5 1.5-1.5 3.5-2.5 7.5-2.5V4c-4 0-6 1-7.5 2.5z"/><path d="M12 6.5v14"/></g></svg>
@@ -733,6 +737,46 @@
     </div>
   </div>
 </section>
+
+<section class="lab-view" id="viewRivals" hidden aria-label="Rivals scouting report">
+  <div class="lab-page">
+    <div class="lab-head">
+      <div class="lab-brand">
+        <span class="lab-knight" aria-hidden="true">&#9876;</span>
+        <div>
+          <h3 class="lab-title">Rivals</h3>
+          <p class="lab-sub">Scouting reports built from the games you have already stored.</p>
+        </div>
+      </div>
+      <div class="lab-actions">
+        <button id="rivalsBackBtn" class="lab-btn" type="button" title="Back to the board (Esc)">&#8592; Board</button>
+        <button id="rivalsRefreshBtn" class="lab-btn" type="button" title="Recompute from stored games">&#8635;</button>
+      </div>
+    </div>
+
+    <div class="lab-card">
+      <div class="lab-card-title"><span>Scouting for</span><span class="lab-meta" id="rivalsMeMeta"></span></div>
+      <div class="rv-id">
+        <select id="rivalsMe" class="rv-select" aria-label="Which player name is you"></select>
+        <span class="rv-id-hint" id="rivalsMeHint"></span>
+      </div>
+    </div>
+
+    <div class="rv-tiles" id="rivalsSummary"></div>
+
+    <div class="lab-card">
+      <div class="lab-card-title">
+        <span>Head-to-head</span>
+        <span class="rv-sorts" id="rivalsSorts">
+          <button class="lab-seg active" type="button" data-sort="games">Most played</button>
+          <button class="lab-seg" type="button" data-sort="tough">Toughest</button>
+          <button class="lab-seg" type="button" data-sort="recent">Recent</button>
+        </span>
+      </div>
+      <div id="rivalsList" class="rv-list"></div>
+    </div>
+  </div>
+</section>
   </div><!-- /main-area -->
 </div><!-- /app-shell -->
 
@@ -1042,6 +1086,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=88"></script>
+<script src="js/app.js?v=89"></script>
 </body>
 </html>
