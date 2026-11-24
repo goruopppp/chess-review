@@ -955,6 +955,22 @@ def api_perf_position():
         return jsonify({"error": str(e)}), 500
 
 
+@app.get("/api/perf/rivals")
+def api_perf_rivals():
+    """Opponent scouting: head-to-head records, their openings and a match plan.
+
+    Built only from stored games/reviews. `?me=` names which player is you; when
+    omitted the server picks the most frequent name and flags `detected`.
+    """
+    from server import perfdb
+    me = (request.args.get("me") or "").strip()[:80] or None
+    try:
+        return jsonify(perfdb.rivals(_uid(), me=me))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.post("/api/perf/games/delete")
 def api_perf_games_delete():
     from server import perfdb
