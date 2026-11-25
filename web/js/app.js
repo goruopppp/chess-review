@@ -2993,6 +2993,256 @@
     await Promise.all(lib.filter((g) => g && g.review).map((g) => perfSyncReviewed(g.review)));
     return lib.length;
   }
+
+  /* ---------------- v90 Chess.com auto-sync ----------------
+     The browser only configures and observes. Fetching, importing and Stockfish
+     analysis run in server threads, so a background tab (or closing the tab)
+     does not stop the queue. If the server sleeps, the next visit resumes it. */
+  const SYNC_POLL_MS = 20000;
+  let syncState = { loaded: false, saving: false, poll: null, data: null };
+
+  function syncAgo(ts) {
+    if (!ts) return "";
+    const secs = Math.max(0, Math.round(Date.now() / 1000 - ts));
+    if (secs < 45) return "just now";
+    if (secs < 3600) return Math.round(secs / 60) + "m ago";
+    if (secs < 86400) return Math.round(secs / 3600) + "h ago";
+    return Math.round(secs / 86400) + "d ago";
+  }
+
+  function syncPaintPill(text, kind) {
+    const el = $("syncPill");
+    if (!el) return;
+    el.textContent = text;
+    el.className = "sync-pill " + (kind || "off");
+  }
+
+  function syncPaintQueue(items) {
+    const el = $("syncQueue");
+    if (!el) return;
+    if (!items.length) {
+      el.innerHTML = `<div class="sync-empty">No games queued.</div>`;
+      return;
+    }
+    el.innerHTML = items.map((it) => {
+      const state = String(it.status || "").replace(/[^a-z]/g, "");
+      const name = it.white && it.black
+        ? esc(it.white) + ` <span>vs</span> ` + esc(it.black)
+        : esc(it.gameId || "Game");
+      const bits = [];
+      if (it.date) bits.push(it.date);
+      if (state === "running") bits.push("reviewing " + Math.round((it.progress || 0) * 100) + "%");
+      else if (state === "queued") bits.push("queued");
+      else if (state === "done") bits.push("reviewed");
+      else if (state === "skipped") bits.push("skipped" + (it.error ? " \u00b7 " + it.error : ""));
+      else if (state === "error") bits.push(it.error || "failed");
+      const bar = state === "running"
+        ? `<div class="sync-bar"><div class="sync-bar-fill" style="width:${Math.max(2, Math.round((it.progress || 0) * 100))}%"></div></div>`
+        : "";
+      return `<div class="sync-item ${state}">
+        <span class="sync-dot"></span>
+        <div class="sync-item-main">
+          <div class="sync-item-name">${name}</div>
+          <div class="sync-item-meta">${esc(bits.join(" \u00b7 "))}</div>
+          ${bar}
+        </div>
+      </div>`;
+    }).join("");
+  }
+
+  function syncSetFields(s) {
+    if ($("syncUser")) $("syncUser").value = s.username || "";
+    if ($("syncSpeed")) $("syncSpeed").value = s.timeClass || "";
+    if ($("syncMax")) $("syncMax").value = String(s.maxGames || 3);
+    if ($("syncStrength")) {
+      $("syncStrength").value = (s.strength && s.strength !== "custom") ? s.strength : "balanced";
+    }
+    if ($("syncEnabled")) $("syncEnabled").checked = !!s.enabled;
+  }
+
+  function syncPaint(data) {
+    data = data || {};
+    const signed = !!accToken();
+    const guest = $("syncGuest"), body = $("syncBody");
+    if (guest) guest.hidden = signed;
+    if (body) body.hidden = !signed;
+    const lede = $("syncLede");
+    if (!signed) {
+      syncPaintPill("Sign in", "off");
+      if (lede) lede.textContent = "Sign in to fetch and review your Chess.com games automatically.";
+      return;
+    }
+    const s = data.settings || {};
+    const counts = data.counts || {};
+    const busy = (counts.running || 0) > 0;
+    const queued = counts.queued || 0;
+    if (!syncState.loaded) {
+      syncSetFields(s);
+      syncState.loaded = true;
+    }
+    const pillText = busy ? "Syncing" : queued ? queued + " queued" : s.enabled ? "On" : "Off";
+    syncPaintPill(pillText, busy || queued ? "busy" : s.enabled ? "on" : "off");
+    if (lede) {
+      lede.textContent = s.enabled
+        ? "New public games are imported and reviewed in the background."
+        : "Turn it on to keep your Performance Lab up to date.";
+    }
+    const status = $("syncStatus");
+    if (status) {
+      if (busy && data.active) {
+        const a = data.active;
+        const who = a.white && a.black ? a.white + " vs " + a.black : "a game";
+        const pct = Math.round((a.progress || 0) * 100);
+        status.textContent = "Reviewing " + who + (pct ? " \u00b7 " + pct + "%" : "");
+      } else if (queued) {
+        status.textContent = queued + (queued === 1 ? " game queued" : " games queued");
+      } else if (s.lastDone) {
+        status.textContent = "Last reviewed " + (s.lastGame || "a game") + " \u00b7 " + syncAgo(s.lastDone);
+      } else if (s.lastFetch) {
+        status.textContent = (s.lastStatus || "Last checked") + " \u00b7 " + syncAgo(s.lastFetch);
+      } else {
+        status.textContent = "Not checked yet.";
+      }
+    }
+    const cancel = $("syncCancel");
+    if (cancel) cancel.hidden = !(queued || busy);
+    syncPaintQueue(data.items || []);
+    const note = $("syncNote");
+    if (note) {
+      if (s.lastError) {
+        note.textContent = s.lastError;
+        note.classList.add("err");
+      } else {
+        note.textContent = "Only public games are fetched. Analysis runs on this server and only writes to your account.";
+        note.classList.remove("err");
+      }
+    }
+    /* A finished background review changed the account's analytics: repaint
+       the Lab and drop the personal-explorer cache so nothing looks stale. */
+    const lastDone = s.lastDone || 0;
+    if (lastDone && syncState.lastDone && lastDone > syncState.lastDone) {
+      myExplorerCache.clear();
+      refreshLab().catch(() => {});
+      if (rivalsOpen) loadRivals();
+    }
+    syncState.lastDone = lastDone;
+    syncState.data = data;
+  }
+
+  async function syncLoad(hydrate) {
+    if (!accToken()) { syncPaint({}); return; }
+    try {
+      const data = await api("/api/autosync/status");
+      if (hydrate) syncState.loaded = false;
+      syncPaint(data);
+    } catch (e) {
+      if (!accToken()) { syncPaint({}); return; }
+      const note = $("syncNote");
+      if (note) {
+        note.textContent = e.message || "Auto-sync status unavailable.";
+        note.classList.add("err");
+      }
+    }
+  }
+
+  function syncShowSignIn() {
+    const btn = $("btnAccount");
+    if (btn) btn.click();
+  }
+
+  function syncPayload() {
+    return {
+      username: (($("syncUser") || {}).value || "").trim(),
+      timeClass: (($("syncSpeed") || {}).value || ""),
+      maxGames: +((($("syncMax") || {}).value) || 3),
+      strength: (($("syncStrength") || {}).value || "balanced"),
+      enabled: !!($("syncEnabled") && $("syncEnabled").checked),
+    };
+  }
+
+  async function syncSave(showToast) {
+    if (!accToken()) { syncShowSignIn(); return null; }
+    if (syncState.saving) return null;
+    const body = syncPayload();
+    if (body.enabled && !body.username) {
+      if ($("syncUser")) $("syncUser").focus();
+      toast("Add your Chess.com username first.", 3200);
+      return null;
+    }
+    syncState.saving = true;
+    try {
+      const r = await post("/api/autosync/settings", body);
+      syncState.loaded = false;
+      await syncLoad(true);
+      if (showToast) toast("Auto-sync settings saved", 2400);
+      return r;
+    } catch (e) {
+      toast(e.message || "Could not save auto-sync settings", 4200);
+      return null;
+    } finally {
+      syncState.saving = false;
+    }
+  }
+
+  async function syncNow() {
+    if (!accToken()) { syncShowSignIn(); return; }
+    const saved = await syncSave(false);
+    if (!saved) return;
+    try {
+      const r = await post("/api/autosync/run", { force: true });
+      if (r && r.reason === "no-username") toast("Add your Chess.com username first.", 3200);
+      else if (r && r.reason === "already-running") toast("A sync is already running.", 2600);
+      else if (r && r.reason === "disabled") toast("Turn on auto-sync first.", 2600);
+      else if (r && r.started) toast("Checking Chess.com for new games...", 3000);
+      await syncLoad(false);
+    } catch (e) {
+      toast(e.message || "Could not start the sync", 4200);
+    }
+  }
+
+  async function syncToggle() {
+    const on = $("syncEnabled") && $("syncEnabled").checked;
+    if (on && !(($("syncUser") || {}).value || "").trim()) {
+      if ($("syncEnabled")) $("syncEnabled").checked = false;
+      if ($("syncUser")) $("syncUser").focus();
+      toast("Add your Chess.com username first.", 3200);
+      return;
+    }
+    await syncSave(false);
+  }
+
+  async function syncCancelQueue() {
+    try {
+      await post("/api/autosync/cancel", {});
+      toast("Queued games cancelled", 2400);
+      await syncLoad(false);
+    } catch (e) {
+      toast(e.message || "Could not cancel the queue", 3600);
+    }
+  }
+
+  function syncReset() {
+    syncState.loaded = false;
+    syncState.data = null;
+    const q = $("syncQueue");
+    if (q) q.innerHTML = "";
+    const note = $("syncNote");
+    if (note) { note.textContent = ""; note.classList.remove("err"); }
+    syncPaint({});
+  }
+
+  function syncBoot() {
+    syncState.loaded = false;
+    syncLoad(true);
+    if (accToken()) post("/api/autosync/run", { force: false }).catch(() => {});
+    if (syncState.poll) clearInterval(syncState.poll);
+    syncState.poll = setInterval(() => {
+      if (!accToken()) return;
+      if (document.visibilityState !== "visible") return;
+      syncLoad(false);
+    }, SYNC_POLL_MS);
+  }
+
   async function perfImportBulk(text) {
     try {
       const r = await post("/api/perf/import_pgn", { pgn: text });
@@ -3032,6 +3282,17 @@
     e.target.value = "";
   };
   $("labRefreshBtn").onclick = refreshLab;
+  /* v90 auto-sync controls */
+  if ($("syncSave")) $("syncSave").onclick = () => syncSave(true);
+  if ($("syncNow")) $("syncNow").onclick = syncNow;
+  if ($("syncCancel")) $("syncCancel").onclick = syncCancelQueue;
+  if ($("syncEnabled")) $("syncEnabled").onchange = syncToggle;
+  if ($("syncSignIn")) $("syncSignIn").onclick = syncShowSignIn;
+  if ($("syncUser")) {
+    $("syncUser").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); syncSave(true); }
+    });
+  }
   document.querySelectorAll("#labColorToggle .lab-seg").forEach((b) => {
     b.classList.toggle("active", b.dataset.color === getLabColor());
     b.onclick = () => setLabColor(b.dataset.color);
@@ -3340,6 +3601,7 @@
       if (rivalsOpen) showRivals(false);   // v89: pages are mutually exclusive
       $("viewLab").scrollTop = 0;
       refreshLab();
+      syncLoad(false);
     }
     if (labOpen && ovOpenState) applyOverview(false);   // v71: pages are mutually exclusive
     syncNav();
@@ -4226,6 +4488,7 @@
       // the server-side analytics are account-scoped: re-attach and reload
       perfSyncLibrary().catch(() => {});
       refreshLab().catch(() => {});
+      syncBoot();
     } catch (e) {
       accNote(e.message || "Sign in failed", true);
     }
@@ -4243,6 +4506,7 @@
     toast("Signed out - progress stays on this device", 3500);
     perfSyncLibrary().catch(() => {});
     refreshLab().catch(() => {});
+    syncReset();
   }
 
   /* ---------------- game library ---------------- */
@@ -5379,7 +5643,8 @@
         .then(() => accSyncLibrary())
         .catch(() => {})
         .then(() => perfSyncLibrary().catch(() => {}))
-        .then(() => trainerSyncIfEmpty().then(() => refreshTrainer()).catch(() => {}));
+        .then(() => trainerSyncIfEmpty().then(() => refreshTrainer()).catch(() => {}))
+        .then(() => syncBoot());
       loadSamples();
       maybeReattachJob(); // a review that was running at refresh keeps going
     });
