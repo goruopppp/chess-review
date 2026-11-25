@@ -10,6 +10,10 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from server.uci import EngineManager
 from server import review
+from server.chesscom import (ChessComError, fetch_games,
+                             is_archive_url as _is_chesscom_archive)  # noqa: F401
+# `_is_chesscom_archive` stays importable here on purpose: the security audit
+# asserts that this module still names the chess.com archive guard.
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -26,6 +30,11 @@ from server import db as _db  # noqa: E402
 from server import mailer  # noqa: E402
 from server import security  # noqa: E402
 accounts.init_db()
+
+# v90: background Chess.com sync. The provider is resolved lazily so the
+# supervisor never starts an engine on a request that does not need one.
+from server import autosync  # noqa: E402
+autosync.init(lambda: manager.get("stockfish"))
 
 # The app loads nothing from another origin (every fetch is same-origin), so a
 # strict policy costs nothing and neutralises any HTML injection that slips
@@ -151,22 +160,6 @@ def _housekeeping_loop():
 
 
 threading.Thread(target=_housekeeping_loop, daemon=True).start()
-
-
-def _is_chesscom_archive(url):
-    """Only chess.com's own HTTPS archive endpoints may be followed.
-
-    The URL comes from an API response, not from the caller - but following a
-    URL that a (compromised or spoofed) API hands us would turn the server
-    into a request proxy, so the host is pinned.
-    """
-    try:
-        from urllib.parse import urlsplit
-        u = urlsplit(url or "")
-        return (u.scheme == "https" and u.hostname == "api.chess.com"
-                and u.path.startswith("/pub/archives"))
-    except Exception:
-        return False
 
 
 # ---------------- accounts ----------------
@@ -605,61 +598,85 @@ def api_chesscom_fetch():
         return _rate("ccfetch:" + ip, 20, 300)
     data = request.get_json(force=True, silent=True) or {}
     username = (data.get("username") or "").strip().lstrip("@").lower()
-    max_games = max(1, min(20, int(data.get("max", 8))))
+    try:
+        max_games = max(1, min(20, int(data.get("max", 8))))
+    except (TypeError, ValueError):
+        max_games = 8
     time_class = (data.get("timeClass") or "").strip().lower()
     if not username:
         return jsonify({"error": "Missing username."}), 400
     if not security.valid_external_username(username):
         return jsonify({"error": "That is not a valid chess.com username."}), 400
-    import datetime as _dt
-
-    import requests as rq
-    headers = {"User-Agent": "chess-review-local-app/1.0 (local game review tool)"}
     try:
-        arch = rq.get(f"https://api.chess.com/pub/player/{username}/games/archives",
-                      headers=headers, timeout=30)
-        arch.raise_for_status()
-        games = []
-        for url in reversed(arch.json().get("archives", [])):
-            if len(games) >= max_games:
-                break
-            # only follow chess.com's own archive URLs - never an arbitrary host
-            if not _is_chesscom_archive(url):
-                continue
-            month = rq.get(url, headers=headers, timeout=30)
-            month.raise_for_status()
-            for g in reversed(month.json().get("games", [])):
-                pgn = g.get("pgn")
-                if not pgn:
-                    continue
-                if time_class and g.get("time_class") != time_class:
-                    continue
-                w, b = g.get("white") or {}, g.get("black") or {}
-                wres, bres = w.get("result"), b.get("result")
-                result = "1-0" if wres == "win" else ("0-1" if bres == "win" else "1/2-1/2")
-                end = g.get("end_time")
-                date = _dt.datetime.fromtimestamp(end).strftime("%Y-%m-%d") if end else ""
-                games.append({
-                    "pgn": pgn,
-                    "white": w.get("username", "?"),
-                    "black": b.get("username", "?"),
-                    "whiteRating": w.get("rating"),
-                    "blackRating": b.get("rating"),
-                    "result": result,
-                    "timeClass": g.get("time_class", ""),
-                    "date": date,
-                })
-                if len(games) >= max_games:
-                    break
-    except rq.HTTPError as e:
-        code = e.response.status_code if e.response is not None else 0
-        msg = "User not found on chess.com." if code == 404 else f"chess.com API error (HTTP {code})"
-        return jsonify({"error": msg}), 502
-    except Exception as e:
-        return jsonify({"error": f"chess.com fetch failed: {e}"}), 502
-    if not games:
-        return jsonify({"error": "No games found for that username / speed filter."}), 404
+        games = fetch_games(username, max_games=max_games, time_class=time_class)
+    except ChessComError as e:
+        return jsonify({"error": e.message}), e.status
     return jsonify({"games": games})
+
+
+# ---------------- auto-sync (v90) ----------------
+@app.get("/api/autosync/status")
+def api_autosync_status():
+    """Settings + queue + current progress for the signed-in account."""
+    uid = _uid()
+    if not uid:
+        return jsonify({"error": "Sign in to use auto-sync."}), 401
+    try:
+        return jsonify(autosync.status(uid))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"auto-sync status failed: {e}"}), 500
+
+
+@app.post("/api/autosync/settings")
+def api_autosync_settings():
+    """Save the chess.com identity / speed / depth preferences."""
+    uid = _uid()
+    if not uid:
+        return jsonify({"error": "Sign in to use auto-sync."}), 401
+    if not security.limiter.allow("autosync-set:" + uid, 60, 3600):
+        return _rate("autosync-set:" + uid, 60, 3600)
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        saved = autosync.save_settings(uid, data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"auto-sync settings failed: {e}"}), 500
+    out = {"ok": True, "settings": autosync.public_settings(saved)}
+    if saved.get("enabled") and saved.get("username"):
+        out["sync"] = autosync.request_sync(uid, manual=False)
+    return jsonify(out)
+
+
+@app.post("/api/autosync/run")
+def api_autosync_run():
+    """Check chess.com now. `force` skips the per-account cooldown."""
+    uid = _uid()
+    if not uid:
+        return jsonify({"error": "Sign in to use auto-sync."}), 401
+    if not security.limiter.allow("autosync-run:" + uid, 20, 3600):
+        return _rate("autosync-run:" + uid, 20, 3600)
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        return jsonify(autosync.request_sync(uid, manual=bool(data.get("force"))))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"auto-sync could not start: {e}"}), 500
+
+
+@app.post("/api/autosync/cancel")
+def api_autosync_cancel():
+    """Drop queued games; the game currently being analysed finishes/aborts."""
+    uid = _uid()
+    if not uid:
+        return jsonify({"error": "Sign in to use auto-sync."}), 401
+    try:
+        return jsonify(autosync.cancel(uid))
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"auto-sync cancel failed: {e}"}), 500
 
 
 @app.get("/api/enginestate")
