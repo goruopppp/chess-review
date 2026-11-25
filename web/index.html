@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=89">
+<link rel="stylesheet" href="css/style.css?v=90">
 </head>
 <body>
 <div class="app-shell">
@@ -731,6 +731,74 @@
       <div id="labRecList" class="lab-rec-list"></div>
     </div>
 
+    <div class="lab-card sync-card" id="syncCard">
+      <div class="lab-card-title">
+        <span>Auto-sync from Chess.com</span>
+        <span class="sync-pill off" id="syncPill">Off</span>
+      </div>
+      <p class="sync-lede" id="syncLede">Fetch your latest public games and review them in the background.</p>
+
+      <div class="sync-guest" id="syncGuest" hidden>
+        <span>Sign in to keep your own games up to date. Auto-sync never writes to the shared guest pool.</span>
+        <button class="lab-btn" id="syncSignIn" type="button">Sign in</button>
+      </div>
+
+      <div id="syncBody" hidden>
+        <div class="sync-setup">
+          <div class="sync-field sync-field-wide">
+            <label class="sync-label" for="syncUser">Chess.com username</label>
+            <input class="input sync-input" id="syncUser" autocomplete="off" spellcheck="false" placeholder="e.g. hikaru">
+          </div>
+          <div class="sync-field">
+            <label class="sync-label" for="syncSpeed">Time class</label>
+            <select class="select sync-input" id="syncSpeed">
+              <option value="">All speeds</option>
+              <option value="bullet">Bullet</option>
+              <option value="blitz">Blitz</option>
+              <option value="rapid">Rapid</option>
+              <option value="daily">Daily</option>
+            </select>
+          </div>
+          <div class="sync-field">
+            <label class="sync-label" for="syncMax">Games per check</label>
+            <select class="select sync-input" id="syncMax">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
+          <div class="sync-field">
+            <label class="sync-label" for="syncStrength">Analysis depth</label>
+            <select class="select sync-input" id="syncStrength">
+              <option value="quick">Quick (d10)</option>
+              <option value="balanced">Balanced (d12)</option>
+              <option value="deep">Deep (d14)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="sync-controls">
+          <label class="sync-check">
+            <input type="checkbox" id="syncEnabled">
+            <span>Check automatically when the app opens</span>
+          </label>
+          <span class="sync-actions">
+            <button class="lab-btn" id="syncSave" type="button">Save</button>
+            <button class="lab-btn lab-btn-primary" id="syncNow" type="button">Sync now</button>
+          </span>
+        </div>
+
+        <div class="sync-line">
+          <span id="syncStatus">Not checked yet.</span>
+          <button class="sync-link" id="syncCancel" type="button" hidden>Cancel queue</button>
+        </div>
+        <div class="sync-queue" id="syncQueue"></div>
+        <p class="sync-note" id="syncNote">Only public games are fetched. Analysis runs on this server and only writes to your account.</p>
+      </div>
+    </div>
+
     <div class="lab-card">
       <div class="lab-card-title"><span>Imported games</span><span class="lab-meta" id="labGameMeta"></span></div>
       <div id="labGameList" class="lab-game-list"></div>
@@ -1086,6 +1154,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=89"></script>
+<script src="js/app.js?v=90"></script>
 </body>
 </html>
