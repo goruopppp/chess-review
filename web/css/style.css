@@ -1310,6 +1310,45 @@ body { -webkit-tap-highlight-color: transparent; }
 .lab-game-del { color: #a09ec0; background: transparent; border: none; cursor: pointer; font-size: 13px; padding: 2px 6px; }
 .lab-game-del:hover { color: #ef4444; }
 
+/* ---------- v90 auto-sync from Chess.com ---------- */
+.sync-card { display: flex; flex-direction: column; gap: 9px; }
+.sync-pill { flex: none; font-size: 9px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase; border-radius: 999px; padding: 2px 8px; background: #f0eff7; color: #8b8aa8; }
+.sync-pill.on { background: #e3f7ea; color: #1e9e50; }
+.sync-pill.busy { background: #efeaff; color: #8050E8; }
+.sync-pill.err { background: #fdeaea; color: #ef4444; }
+.sync-lede { margin: -2px 0 0; font-size: 10.5px; line-height: 1.45; color: #7d7b9d; }
+.sync-guest { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px dashed #dcd8ee; border-radius: 10px; background: #faf9fe; padding: 10px 11px; font-size: 10.5px; color: #5d5b80; line-height: 1.4; }
+.sync-guest .lab-btn { flex: none; }
+.sync-setup { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.sync-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sync-field-wide { grid-column: 1 / -1; }
+.sync-label { font-size: 8.5px; text-transform: uppercase; letter-spacing: .9px; color: #8c89ab; font-weight: 800; }
+.sync-input { font-size: 11px; padding: 5px 8px; min-width: 0; width: 100%; background: #ffffff; }
+.sync-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-top: 9px; }
+.sync-check { display: inline-flex; align-items: center; gap: 7px; font-size: 10.5px; color: #5d5b80; font-weight: 650; cursor: pointer; }
+.sync-check input { accent-color: #8050E8; width: 14px; height: 14px; margin: 0; }
+.sync-actions { display: flex; gap: 6px; margin-left: auto; }
+.sync-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: #5d5b80; margin-top: 8px; }
+.sync-link { background: transparent; border: none; color: #8050E8; font-size: 9.5px; font-weight: 700; cursor: pointer; padding: 0; }
+.sync-link:hover { text-decoration: underline; }
+.sync-queue { display: flex; flex-direction: column; gap: 4px; max-height: 190px; overflow-y: auto; margin-top: 6px; }
+.sync-empty { padding: 9px 10px; border: 1px dashed #e6e3f4; border-radius: 8px; background: #faf9fe; color: #a09ec0; font-size: 10px; text-align: center; }
+.sync-item { display: grid; grid-template-columns: 8px 1fr; gap: 8px; align-items: start; background: #f8f7fd; border: 1px solid #eeeaf9; border-radius: 8px; padding: 6px 8px; }
+.sync-dot { width: 7px; height: 7px; border-radius: 50%; background: #c3c8d4; margin-top: 4px; }
+.sync-item.running .sync-dot { background: #8050E8; box-shadow: 0 0 0 3px rgba(128,80,232,.14); }
+.sync-item.queued .sync-dot { background: #f5a524; }
+.sync-item.done .sync-dot { background: #40B88B; }
+.sync-item.error .sync-dot { background: #ef4444; }
+.sync-item.skipped .sync-dot { background: #c3c8d4; }
+.sync-item-main { min-width: 0; }
+.sync-item-name { font-size: 10.5px; font-weight: 700; color: #24233f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sync-item-name span { color: #a09ec0; font-weight: 600; }
+.sync-item-meta { font-size: 9px; color: #8c89ab; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sync-bar { height: 3px; border-radius: 2px; background: #e6e3f4; overflow: hidden; margin-top: 4px; }
+.sync-bar-fill { height: 100%; background: #8050E8; border-radius: 2px; transition: width .3s ease; }
+.sync-note { margin: 0; font-size: 9px; line-height: 1.45; color: #a09ec0; }
+.sync-note.err { color: #ef4444; }
+
 .lab-empty { padding: 18px 14px; text-align: center; color: #8c89ab; font-size: 11px; border: 1px dashed #dcd8ee; border-radius: 9px; background: #faf9fe; }
 .lab-import-text { width: 100%; height: 220px; font-family: ui-monospace, monospace; font-size: 11.5px; resize: vertical; background: #ffffff; color: #24233f; border: 1px solid #dcd8ee; }
 .lab-import-error { color: #ef4444; font-size: 11px; }
