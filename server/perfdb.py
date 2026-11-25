@@ -74,10 +74,22 @@ def cache_clear():
         _POS_INDEX.clear()
 
 
+def _freeze(value):
+    """Make list/dict arguments hashable for the short-lived read cache."""
+    if isinstance(value, list):
+        return tuple(_freeze(v) for v in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze(v) for v in value)
+    if isinstance(value, dict):
+        return tuple(sorted((k, _freeze(v)) for k, v in value.items()))
+    return value
+
+
 def _cached(fn):
     """Memoize a read-only analytics function for a few seconds."""
     def wrapper(*args, **kwargs):
-        key = (fn.__name__, args, tuple(sorted(kwargs.items())))
+        key = (fn.__name__, tuple(_freeze(a) for a in args),
+               tuple(sorted((k, _freeze(v)) for k, v in kwargs.items())))
         hit = _cache_get(key)
         if hit is not None:
             return hit
@@ -288,6 +300,11 @@ def _row_id(raw_id, user_id):
     two accounts can hold the same game without colliding on the PK."""
     raw = (raw_id or "").strip()
     return f"{user_id}:{raw}" if user_id else raw
+
+
+def scoped_game_id(raw_id, user_id=""):
+    """Public wrapper for the account-scoped row id used by import/queue code."""
+    return _row_id(raw_id, user_id)
 
 
 def _canonical_player(name, user_id=""):
@@ -885,6 +902,27 @@ def overall(user_id=""):
                     for m, n, w, l, d in monthly],
         "openings": openings_out,
         "unknownOpenings": unknown,
+    }
+
+
+def game_for_review(gid, user_id=""):
+    """Load the stored PGN + reviewed flag for one account-scoped game.
+
+    Deliberately uncached: the auto-sync worker uses it right before analysing
+    and again right before writing, so a manual review that landed in between
+    is always visible.
+    """
+    with _lock:
+        conn = _connect()
+        row = conn.execute(
+            "SELECT id, white, black, result, date, reviewed, pgn_text, opening"
+            " FROM games WHERE id = ? AND user_id = ?", (gid, user_id)).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0], "white": row[1], "black": row[2], "result": row[3],
+        "date": row[4], "reviewed": bool(row[5]), "pgn": row[6] or "",
+        "opening": row[7] or "",
     }
 
 
