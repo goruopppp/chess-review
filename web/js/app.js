@@ -2584,6 +2584,13 @@
   function paintLabDelta(el, delta) {
     if (!el) return;
     if (delta == null) {
+      el.hidden = true;
+      el.className = "lab-delta";
+      el.textContent = "";
+      return;
+    }
+    el.hidden = false;
+    if (delta === 0) {
       el.className = "lab-delta flat";
       el.textContent = "flat";
       return;
