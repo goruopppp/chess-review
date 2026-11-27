@@ -2710,14 +2710,14 @@
       const decided = f.wins + f.losses + f.draws;
       const wr = decided ? Math.round(100 * f.wins / decided) : null;
       const wrCls = wr == null ? "" : wr >= 60 ? "ok" : wr >= 40 ? "mid" : "bad";
-      const confNote = f.confidence === "high" ? "" : ` · small sample (N=${f.games})`;
+      const confNote = f.confidence === "high" ? "" : " · low sample";
       const wPct = f.games ? Math.round(100 * f.wins / f.games) : 0;
       const dPct = f.games ? Math.round(100 * f.draws / f.games) : 0;
       const lPct = f.games ? Math.max(0, 100 - wPct - dPct) : 0;
       return `<div class="lab-op">
         <span class="lab-op-eco">${labEscape(f.eco || "?")}</span>
         <span>
-          <div class="lab-op-name">${labEscape(f.opening)}</div>
+          <div class="lab-op-name" title="${labEscape(f.opening)}">${labEscape(f.opening)}</div>
           <div class="lab-op-meta">${f.games} games · ${f.wins}W ${f.losses}L ${f.draws}D${confNote}</div>
           <div class="lab-wd"><span class="lab-wd-w" style="width:${wPct}%"></span><span class="lab-wd-d" style="width:${dPct}%"></span><span class="lab-wd-l" style="width:${lPct}%"></span></div>
         </span>
@@ -2946,7 +2946,27 @@
     });
   }
 
+  function paintLabLoading() {
+    const msg = `<div class="lab-empty">Loading your analytics…</div>`;
+    ["labWeaknessCards", "labOpeningRows", "labRecList", "labGameList", "labDailyList"].forEach((id) => {
+      const el = $(id);
+      if (el && !el.children.length) el.innerHTML = msg;
+    });
+    const chips = $("labMetricChips");
+    if (chips && !chips.children.length) chips.innerHTML = `<div class="lab-empty">Loading behavior metrics…</div>`;
+    document.querySelectorAll("#labTiles .lab-chart").forEach((svg) => {
+      if (!svg.childNodes.length) svg.innerHTML = `<text class="lab-ch-empty" x="110" y="40">Loading…</text>`;
+    });
+    const gsvg = document.querySelector('.lab-tile[data-skill="games"] .lab-donut');
+    if (gsvg && !gsvg.childNodes.length) {
+      gsvg.innerHTML = `<circle class="lab-dn-ring" cx="52" cy="52" r="40"/><text class="lab-dn-empty" x="52" y="56">Loading</text>`;
+    }
+    const gside = document.querySelector('.lab-tile[data-skill="games"] .lab-donut-side');
+    if (gside && !gside.children.length) gside.innerHTML = `<div class="lab-ds-row">Fetching games…</div>`;
+  }
+
   async function refreshLab() {
+    paintLabLoading();
     try {
       await perfSyncLibrary();   // v66: Library is the source of truth - re-attach missing reviewed games first
       const [w, o, r, g, m, s] = await Promise.all([
@@ -2961,15 +2981,22 @@
       paintLabRadar(m); paintLabMetricChips(m); paintLabRadarNote(m);
     } catch (e) {
       clearLabTiles();
-      const ratingTile = labTile("rating");
-      if (ratingTile) {
-        const svg = ratingTile.querySelector(".lab-chart");
-        if (svg) svg.innerHTML = `<text class="lab-ch-empty" x="110" y="40">Lab unavailable \u2014 is the server awake?</text>`;
-      }
-      $("labWeaknessCards").innerHTML = ""; $("labOpeningRows").innerHTML = "";
-      $("labRecList").innerHTML = ""; $("labGameList").innerHTML = "";
-      $("labRadar").innerHTML = ""; $("labMetricChips").innerHTML = "";
-      $("labRadarNote").textContent = ""; $("labDailyList").innerHTML = "";
+      document.querySelectorAll("#labTiles .lab-chart").forEach((svg) => {
+        svg.innerHTML = `<text class="lab-ch-empty" x="110" y="40">Lab unavailable</text>`;
+      });
+      const gsvg = document.querySelector('.lab-tile[data-skill="games"] .lab-donut');
+      if (gsvg) gsvg.innerHTML = `<circle class="lab-dn-ring" cx="52" cy="52" r="40"/><text class="lab-dn-empty" x="52" y="56">Offline</text>`;
+      const gside = document.querySelector('.lab-tile[data-skill="games"] .lab-donut-side');
+      if (gside) gside.innerHTML = `<div class="lab-ds-row">No data</div>`;
+      $("labWeaknessCards").innerHTML = `<div class="lab-empty">Weakness analysis unavailable — refresh to try again.</div>`;
+      $("labOpeningRows").innerHTML = `<div class="lab-empty">Opening stats unavailable — refresh to try again.</div>`;
+      $("labRecList").innerHTML = `<div class="lab-empty">Recommendations unavailable — refresh to try again.</div>`;
+      $("labGameList").innerHTML = `<div class="lab-empty">Game list unavailable — refresh to try again.</div>`;
+      $("labDailyList").innerHTML = `<div class="lab-empty">Daily workout unavailable — refresh to try again.</div>`;
+      $("labRadar").innerHTML = `<text class="lab-radar-empty" x="150" y="138">&#9822;</text>`;
+      $("labMetricChips").innerHTML = `<div class="lab-empty">Behavior metrics unavailable — refresh to try again.</div>`;
+      $("labRadarNote").textContent = "";
+      $("labGameMeta").textContent = "offline";
     }
   }
   async function perfSyncReviewed(res) {
@@ -3499,7 +3526,7 @@
             <span class="rv-score ${rivalScoreCls(r.score)}">${rivalScoreTxt(r.score)}</span>
             <span class="rv-wdl" title="Your results against them">${r.wins}W ${r.draws}D ${r.losses}L</span>
           </span>
-          <span class="rv-chev" aria-hidden="true">&#9662;</span>
+          <span class="rv-chev" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
         </button>
         ${open ? rivalDetail(r) : ""}
       </div>`;
@@ -3564,7 +3591,10 @@
       if (labOpen) showLab(false);          // pages are mutually exclusive
       if (ovOpenState) applyOverview(false);
       $("viewRivals").scrollTop = 0;
+      resetPageScroll();
       loadRivals();
+    } else {
+      resetPageScroll();
     }
     syncNav();
   }
@@ -3600,8 +3630,11 @@
     if (labOpen) {
       if (rivalsOpen) showRivals(false);   // v89: pages are mutually exclusive
       $("viewLab").scrollTop = 0;
+      resetPageScroll();
       refreshLab();
       syncLoad(false);
+    } else {
+      resetPageScroll();
     }
     if (labOpen && ovOpenState) applyOverview(false);   // v71: pages are mutually exclusive
     syncNav();
@@ -3629,9 +3662,19 @@
     if (ovOpenState && rivalsOpen) showRivals(false);
     if (ovOpenState) {
       $("viewOverview").scrollTop = 0;
+      resetPageScroll();
       refreshOverview();
+    } else {
+      resetPageScroll();
     }
     syncNav();
+  }
+  /* v91: on phones the document itself scrolls, so reset it whenever a full page
+     opens or closes. Otherwise the next page can land halfway down. */
+  function resetPageScroll() {
+    try { window.scrollTo(0, 0); } catch (e) { /* no window */ }
+    const se = document.scrollingElement;
+    if (se) se.scrollTop = 0;
   }
   /* deterministic destination scroll: mobile shell scrolls the document, while an
      overflow:auto section ancestor (*-view) can own-but-never-scroll the chain */
@@ -3662,7 +3705,22 @@
     if (els[k]) els[k].classList.add("active");
   }
 
+  function paintOvLoading() {
+    const msg = `<div class="lab-empty">Loading your dashboard…</div>`;
+    ["ovSkills", "ovWeakList", "ovOpenings", "ovInsights", "ovGameList"].forEach((id) => {
+      const el = $(id);
+      if (el && !el.children.length) el.innerHTML = msg;
+    });
+    const svg = $("ovDonut");
+    if (svg && !svg.childNodes.length) {
+      svg.innerHTML = `<circle class="lab-dn-ring" cx="52" cy="52" r="40"/><text class="lab-dn-empty" x="52" y="56">Loading</text>`;
+    }
+    const side = $("ovDonutSide");
+    if (side && !side.children.length) side.innerHTML = `<div class="lab-ds-row">Fetching games…</div>`;
+  }
+
   async function refreshOverview() {
+    paintOvLoading();
     try {
       const [d, s, g, w, r] = await Promise.all([
         api("/api/perf/overall"),
@@ -3679,13 +3737,21 @@
       paintOvWeaknesses(w);
       paintOvGames((g.games || []).slice(0, 6), g && g.total);
     } catch (e) {
-      [["ovRating"], ["ovWin"], ["ovGames"]].forEach(([, id]) => {
+      ["ovRating", "ovWin", "ovGames"].forEach((id) => {
         const el = $(id);
+        if (!el) return;
         el.textContent = "\u2013"; el.style.color = "var(--muted)";
       });
-      $("ovSkills").innerHTML = ""; $("ovDonut").innerHTML = ""; $("ovDonutSide").innerHTML = "";
-      $("ovWeakList").innerHTML = ""; $("ovOpenings").innerHTML = ""; $("ovInsights").innerHTML = ""; $("ovGameList").innerHTML = "";
-      $("ovSkillsMeta").textContent = ""; $("ovDonutMeta").textContent = ""; $("ovGamesMeta").textContent = "server still waking up";
+      $("ovSkills").innerHTML = `<div class="lab-empty">Performance data unavailable — the server did not respond. Try again in a moment.</div>`;
+      $("ovDonut").innerHTML = `<circle class="lab-dn-ring" cx="52" cy="52" r="40"/><text class="lab-dn-empty" x="52" y="56">Offline</text>`;
+      $("ovDonutSide").innerHTML = `<div class="lab-ds-row">No data</div>`;
+      $("ovWeakList").innerHTML = `<div class="lab-empty">Weaknesses unavailable — try again in a moment.</div>`;
+      $("ovOpenings").innerHTML = `<div class="lab-empty">Opening stats unavailable — try again in a moment.</div>`;
+      $("ovInsights").innerHTML = `<div class="lab-empty">Insights unavailable — try again in a moment.</div>`;
+      $("ovGameList").innerHTML = `<div class="lab-empty">Recent games unavailable — try again in a moment.</div>`;
+      $("ovSkillsMeta").textContent = "";
+      $("ovDonutMeta").textContent = "";
+      $("ovGamesMeta").textContent = "offline";
       $("ovOpeningsMeta").textContent = "";
     }
   }
@@ -3731,9 +3797,11 @@
     Object.keys(OV_SKILL_NAMES).forEach((k) => {
       const d = skills && skills[k];
       if (d && d.points && d.points.length && d.avg != null) {
+        const score = Math.round(d.avg);
+        const cls = score >= 70 ? "ok" : score >= 40 ? "mid" : "bad";
         rows.push(`<div class="ov-skill"><span class="ov-skill-name">${OV_SKILL_NAMES[k]}</span>`
-          + `<span class="ov-bar-track"><span class="ov-bar-fill" style="width:${Math.round(d.avg)}%"></span></span>`
-          + `<span class="ov-skill-val">${Math.round(d.avg)}/100</span></div>`);
+          + `<span class="ov-bar-track"><span class="ov-bar-fill ${cls}" style="width:${score}%"></span></span>`
+          + `<span class="ov-skill-val">${score}/100</span></div>`);
       }
     });
     if (!rows.length) {
@@ -3764,7 +3832,7 @@
         + `<span class="ov-op-track"><span class="ov-op-mid"></span><span class="ov-op-fill ${cls}" style="width:${width.toFixed(1)}%"></span></span>`
         + `<span class="ov-op-val"><b>${score.toFixed(2)}</b> &middot; ${f.games}g</span></div>`;
     }).join("");
-    meta.textContent = "average score per opening family · " + list.length + " shown of " + all.length;
+    meta.textContent = "avg score · " + list.length + " of " + all.length;
   }
 
   function paintOvInsights(recs) {
