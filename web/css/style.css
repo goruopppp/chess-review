@@ -1,23 +1,33 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   Chess Review Studio — a quiet, precise chess workspace
-   Warm paper by day, graphite by night, one brass accent.
-   Typography: Instrument Sans (UI), Instrument Serif (display), IBM Plex Mono
-   (data labels). Self-hosted to keep the strict CSP.
+   Chess Review Studio — precision instrument
+   Cool graphite by night, cool paper by day, one sky-blue accent.
+   Typography: Space Grotesk (UI + display), IBM Plex Mono (data labels).
+   Self-hosted to keep the strict CSP.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 @font-face {
-  font-family: "Instrument Sans";
+  font-family: "Space Grotesk";
   font-style: normal;
-  font-weight: 400 700;
+  font-weight: 300 700;
   font-display: swap;
-  src: url("../assets/fonts/InstrumentSans-Variable.woff2") format("woff2");
+  src: url("../assets/fonts/V8mDoQDjQSkFtoMM3T6r8E7mPbF4Cw.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 @font-face {
-  font-family: "Instrument Serif";
+  font-family: "Space Grotesk";
   font-style: normal;
-  font-weight: 400;
+  font-weight: 300 700;
   font-display: swap;
-  src: url("../assets/fonts/InstrumentSerif-Regular.woff2") format("woff2");
+  src: url("../assets/fonts/V8mDoQDjQSkFtoMM3T6r8E7mPb94C-s0.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("../assets/fonts/V8mDoQDjQSkFtoMM3T6r8E7mPb54C-s0.woff2") format("woff2");
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
 }
 @font-face {
   font-family: "IBM Plex Mono";
@@ -43,43 +53,43 @@
 
 :root {
   /* dark theme (default) */
-  --bg: #17181a;
-  --bg-soft: #1b1c1f;
-  --panel: #202226;
-  --panel2: #26282d;
-  --inset: #141518;
-  --border: rgba(255, 255, 255, 0.075);
-  --border2: rgba(255, 255, 255, 0.15);
-  --text: #ece8df;
-  --text-soft: #d6d0c4;
-  --muted: #a39d90;
-  --faint: #736e64;
-  --accent: #d8a84e;
-  --accent-hover: #e7ba63;
-  --accent-dim: rgba(216, 168, 78, 0.14);
-  --accent-line: rgba(216, 168, 78, 0.38);
-  --on-accent: #211708;
-  --green: #4cc38a;
-  --green2: #57d096;
-  --teal: #3fb8a8;
-  --yellow: #e5b84b;
-  --orange: #f08c4a;
-  --red: #f07167;
-  --pink: #f08a80;
-  --brown: #b08a5f;
-  --blue: #6ea8e8;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.24), 0 12px 32px rgba(0, 0, 0, 0.26);
-  --shadow-pop: 0 20px 56px rgba(0, 0, 0, 0.55);
-  --radius: 9px;
-  --radius-lg: 14px;
-  --r-xs: 4px;
-  --r-sm: 6px;
-  --r-md: 9px;
-  --r-lg: 14px;
-  --r-xl: 18px;
+  --bg: #0a0a0b;
+  --bg-soft: #111113;
+  --panel: #161618;
+  --panel2: #1c1c1f;
+  --inset: #0e0e10;
+  --border: rgba(255, 255, 255, 0.06);
+  --border2: rgba(255, 255, 255, 0.12);
+  --text: #f4f4f5;
+  --text-soft: #d4d4d8;
+  --muted: #a1a1aa;
+  --faint: #71717a;
+  --accent: #0ea5e9;
+  --accent-hover: #38bdf8;
+  --accent-dim: rgba(14, 165, 233, 0.12);
+  --accent-line: rgba(14, 165, 233, 0.35);
+  --on-accent: #0b1220;
+  --green: #22c55e;
+  --green2: #16a34a;
+  --teal: #14b8a6;
+  --yellow: #eab308;
+  --orange: #f97316;
+  --red: #ef4444;
+  --pink: #ec4899;
+  --brown: #a16207;
+  --blue: #3b82f6;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-pop: 0 20px 56px rgba(0, 0, 0, 0.6);
+  --radius: 6px;
+  --radius-lg: 10px;
+  --r-xs: 3px;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 10px;
+  --r-xl: 14px;
   --r-pill: 999px;
-  --font-ui: "Instrument Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --font-ui: "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
   --fs-2xs: 10px;
   --fs-xs: 11px;
@@ -100,40 +110,40 @@
   --dur: 160ms;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   /* board squares (overridable per board theme) */
-  --light-sq: #ebecd0;
-  --dark-sq: #739552;
-  --hl: rgba(246, 246, 105, 0.5);
-  --sel: rgba(255, 255, 80, 0.4);
+  --light-sq: #e8e8e8;
+  --dark-sq: #6f6f6f;
+  --hl: rgba(255, 255, 255, 0.15);
+  --sel: rgba(255, 255, 255, 0.1);
 }
 
 html[data-ui-theme="light"] {
-  --bg: #f4f1e9;
-  --bg-soft: #f8f5ee;
-  --panel: #fefcf7;
-  --panel2: #f3efe5;
-  --inset: #eae5d9;
-  --border: #e2dccf;
-  --border2: #d0c8b7;
-  --text: #24221d;
-  --text-soft: #3b372f;
-  --muted: #777267;
-  --faint: #a29b8e;
-  --accent: #8a5a12;
-  --accent-hover: #71480d;
-  --accent-dim: rgba(138, 90, 18, 0.1);
-  --accent-line: rgba(138, 90, 18, 0.3);
-  --on-accent: #fffdf8;
-  --green: #2e7d5b;
-  --green2: #256a4c;
-  --teal: #1f7a70;
-  --yellow: #a96f16;
-  --orange: #b85f25;
-  --red: #b8432c;
-  --pink: #b8564a;
-  --brown: #8b6a45;
-  --blue: #3f6f9e;
-  --shadow: 0 1px 2px rgba(52, 44, 30, 0.04), 0 10px 28px rgba(52, 44, 30, 0.06);
-  --shadow-pop: 0 20px 56px rgba(52, 44, 30, 0.16);
+  --bg: #fafafa;
+  --bg-soft: #f4f4f5;
+  --panel: #ffffff;
+  --panel2: #f4f4f5;
+  --inset: #f1f1f2;
+  --border: #e4e4e7;
+  --border2: #d4d4d8;
+  --text: #18181b;
+  --text-soft: #27272a;
+  --muted: #71717a;
+  --faint: #a1a1aa;
+  --accent: #0284c7;
+  --accent-hover: #0369a1;
+  --accent-dim: rgba(2, 132, 199, 0.08);
+  --accent-line: rgba(2, 132, 199, 0.25);
+  --on-accent: #ffffff;
+  --green: #16a34a;
+  --green2: #15803d;
+  --teal: #0d9488;
+  --yellow: #ca8a04;
+  --orange: #ea580c;
+  --red: #dc2626;
+  --pink: #db2777;
+  --brown: #92400e;
+  --blue: #2563eb;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-pop: 0 20px 56px rgba(0, 0, 0, 0.12);
 }
 
 /* board theme overrides (independent of UI theme) */
@@ -157,8 +167,9 @@ body {
   text-rendering: optimizeLegibility;
 }
 button { font: inherit; color: inherit; }
-h1, h2, h3, h4 { font-family: var(--font-ui); letter-spacing: -0.015em; }
-h2, h3 { font-weight: 650; }
+h1, h2, h3, h4 { font-family: var(--font-ui); letter-spacing: -0.03em; font-weight: 600; }
+h1 { font-weight: 700; letter-spacing: -0.04em; }
+h2, h3 { font-weight: 600; }
 ::selection { background: var(--accent-dim); color: var(--text); }
 :where(button, a, select, input, textarea, [tabindex]):focus-visible {
   outline: 2px solid var(--accent);
@@ -168,21 +179,12 @@ h2, h3 { font-weight: 650; }
 .text-muted { color: var(--muted); }
 .text-small { font-size: 12px; }
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: padding-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-/* ---------- floating glass (the only blur in the app) ---------- */
-.topbar, .toast, .graph-tip, .modal-backdrop {
-  -webkit-backdrop-filter: blur(18px) saturate(1.4);
-  backdrop-filter: blur(18px) saturate(1.4);
-}
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .topbar, .toast, .graph-tip { background: var(--panel); }
-  .modal-backdrop { background: rgba(0, 0, 0, 0.6); }
-}
+/* no glassmorphism — solid surfaces only */
+.topbar, .toast, .graph-tip, .modal-backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
 
 /* ---------- app shell: sidebar + main ---------- */
 .app-shell { display: flex; min-height: 100vh; }
@@ -268,7 +270,7 @@ body.side-collapsed #btnColl .ic { transform: rotate(180deg); }
   box-shadow: var(--shadow);
 }
 .brand { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; margin-right: auto; }
-.brand-knight { color: var(--accent); font-size: 18px; }
+.brand-knight { color: var(--accent); width: 18px; height: 18px; flex: 0 0 18px; display: inline-flex; align-items: center; }
 .brand-name b { font-weight: 700; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .engine-box { display: inline-flex; align-items: center; }
@@ -1002,7 +1004,7 @@ html[data-ui-theme="light"] .wdl .w { background: #ffffff; box-shadow: inset 0 0
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
 .status-dot.busy { background: var(--yellow); }
 .side-sep { width: 24px; height: 1px; background: var(--border); margin: 4px 0; }
-.brand-knight { color: var(--accent); font-size: 18px; }
+.brand-knight { color: var(--accent); width: 18px; height: 18px; flex: 0 0 18px; display: inline-flex; align-items: center; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 980px) {
@@ -1359,7 +1361,8 @@ body { -webkit-tap-highlight-color: transparent; }
 }
 
 /* ---------- skill tiles ---------- */
-.lab-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.lab-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.lab-tile[data-skill="rating"] { grid-column: span 2; }
 .lab-tile {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
   padding: 15px 16px; min-width: 0;
@@ -1372,7 +1375,8 @@ body { -webkit-tap-highlight-color: transparent; }
   display: flex; align-items: center; gap: 7px; min-width: 0;
   font-size: var(--fs-sm); font-weight: 600; color: var(--text);
 }
-.lab-tile-ic { font-size: 13px; color: var(--accent); line-height: 1; }
+.lab-tile-ic { width: 16px; height: 16px; color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
+.lab-tile-ic svg { width: 16px; height: 16px; }
 .lab-delta {
   flex-shrink: 0; font-family: var(--font-mono); font-size: var(--fs-2xs); font-weight: 600;
   border-radius: var(--r-pill); padding: 3px 8px; line-height: 1.4;
@@ -1709,7 +1713,7 @@ body { -webkit-tap-highlight-color: transparent; }
 }
 .rv-select:hover { border-color: var(--muted); }
 .rv-id-hint { font-size: 11.5px; color: var(--muted); line-height: 1.45; min-width: 0; }
-.rv-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.rv-tiles { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 12px; }
 .rv-tile {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
   padding: 16px 18px; min-width: 0;
@@ -1824,7 +1828,7 @@ body { -webkit-tap-highlight-color: transparent; }
 /* ═══════════════════════════════════════════════════════════════════════════
    Overview dashboard (v71, restyled v91)
    ═══════════════════════════════════════════════════════════════════════════ */
-.ov-statrow { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.ov-statrow { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 14px; }
 .ov-stat {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
   padding: 18px 20px; min-width: 0;
