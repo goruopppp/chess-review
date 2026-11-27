@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Game Review - Chess Review Studio</title>
 <link rel="icon" type="image/svg+xml" href="assets/pieces/favicon.svg">
-<link rel="stylesheet" href="css/style.css?v=90">
+<link rel="preload" href="assets/fonts/InstrumentSans-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/style.css?v=91">
 </head>
 <body>
 <div class="app-shell">
@@ -500,7 +501,7 @@
           <button class="lab-seg" data-color="white" type="button" aria-label="Analyze White side">White</button>
           <button class="lab-seg" data-color="black" type="button" aria-label="Analyze Black side">Black</button>
         </span>
-        <button id="ovBackBtn" class="lab-btn" type="button" title="Back to the board (Esc)">&#8592; Board</button>
+        <button id="ovBackBtn" class="lab-btn" type="button" title="Back to the board (Esc)"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Board</button>
       </div>
     </div>
 
@@ -571,7 +572,7 @@
         </div>
       </div>
       <div class="lab-actions">
-        <button id="labBackBtn" class="lab-btn" type="button" title="Back to the board (Esc)">&#8592; Board</button>
+        <button id="labBackBtn" class="lab-btn" type="button" title="Back to the board (Esc)"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Board</button>
         <button id="labImportBtn" class="lab-btn lab-btn-primary" type="button">&#8682; Import file</button>
         <input type="file" id="labImportFile" accept=".pgn,application/x-chess-pgn" hidden>
         <button id="labImportPgnBtn" class="lab-btn" type="button">Paste PGN</button>
@@ -703,7 +704,7 @@
         </span>
       </div>
       <div class="lab-radar-wrap">
-        <svg id="labRadar" class="lab-radar" viewBox="0 0 300 240" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Your performance radar across six axes"></svg>
+        <svg id="labRadar" class="lab-radar" viewBox="-14 -8 328 262" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Your performance radar across six axes"></svg>
         <div id="labMetricChips" class="lab-metric-chips"></div>
       </div>
       <p class="lab-meta" id="labRadarNote"></p>
@@ -817,7 +818,7 @@
         </div>
       </div>
       <div class="lab-actions">
-        <button id="rivalsBackBtn" class="lab-btn" type="button" title="Back to the board (Esc)">&#8592; Board</button>
+        <button id="rivalsBackBtn" class="lab-btn" type="button" title="Back to the board (Esc)"><svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M14.5 5.5 8 12l6.5 6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Board</button>
         <button id="rivalsRefreshBtn" class="lab-btn" type="button" title="Recompute from stored games">&#8635;</button>
       </div>
     </div>
@@ -1154,6 +1155,6 @@
 
 <script src="js/board.js?v=45"></script>
 <script src="js/graph.js?v=45"></script>
-<script src="js/app.js?v=90"></script>
+<script src="js/app.js?v=91"></script>
 </body>
 </html>
