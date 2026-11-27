@@ -1,4 +1,5 @@
 """Flask app: serves the web UI and the review/engine JSON API."""
+import mimetypes
 import os
 import threading
 import time
@@ -7,6 +8,11 @@ import uuid
 from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory
+
+# v91: Windows' registry does not always know the woff2 type, and the UI
+# self-hosts its fonts to satisfy the strict CSP. Declare it explicitly.
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("font/woff", ".woff")
 
 from server.uci import EngineManager
 from server import review
